@@ -167,3 +167,33 @@ def test_exam_count_and_tags(tmp_path):
     info = questions_doc(tmp_path, [f"Question {i}: text" for i in range(1, 7)])
     res = {f.code: f for f in A.exam_checks(ctx, doc, info, "chapter_exam")}
     assert res["CE4"].status == FAIL and "No SLO tags" in res["CE4"].message
+
+
+import pytest
+
+
+@pytest.mark.parametrize("fmt", ["{}.", "{})", "Q{}.", "Q.{}", "Q {}:", "Question {})", "({})", "{} -", "Q{}"])
+def test_common_english_question_formats_are_recognised(tmp_path, fmt):
+    info = questions_doc(tmp_path, [fmt.format(i) + " What is the capital of Pakistan?" for i in range(1, 7)])
+    qs = parse_questions(info, PROFILE)
+    assert [q.num for q in qs] == [1, 2, 3, 4, 5, 6]
+
+
+def test_automatic_list_numbering_counts_as_questions(tmp_path):
+    d = new_doc()
+    for _ in range(6):
+        d.add_paragraph("What is the capital of Pakistan?", style="List Number")
+    assert len(parse_questions(parse_docx(save(d, tmp_path)), PROFILE)) == 6
+
+
+@pytest.mark.parametrize("opts", [["(a) x", "(b) y", "(c) z"], ["a) x", "b) y", "c) z"], ["A. x", "B. y", "C. z"]])
+def test_mcq_option_styles(tmp_path, opts):
+    info = questions_doc(tmp_path, ["Question 1: pick one"] + opts)
+    assert parse_questions(info, PROFILE)[0].qtype == "mcq"
+
+
+def test_unrecognised_question_format_is_reviewed_not_failed(tmp_path):
+    # Roman numerals are not a recognised format: the answer must be 'needs reviewer', never a false Fail
+    info = questions_doc(tmp_path, [f"{r}. What is it?" for r in ("i", "ii", "iii", "iv", "v", "vi")])
+    res = {f.code: f for f in A.exam_checks(make_ctx(), ref(doc_type="chapter_exam"), info, "chapter_exam")}
+    assert res["CE1"].status == REVIEW and "not be supported" in res["CE1"].message

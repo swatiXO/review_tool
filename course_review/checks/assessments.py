@@ -62,6 +62,9 @@ def align_pop_quiz(ctx):
             variant = h["variant"] if (h["num"], h["variant"]) in pkg_keys[ch] else ""
             key = LessonKey(ch, h["num"], variant)
             mapping[key] = parse_questions(info, ctx.profile, h["start"] + 1, h["end"])
+    if not any(mapping.values()):
+        return {}, info, ("No questions were recognised anywhere in the Pop Quiz, so its question format may not be supported "
+                          "(recognised: '1.', '1)', 'Q1.', 'Q.1', 'Question 1:', '(1)', automatic numbering)")
     return mapping, info, None
 
 
@@ -136,6 +139,10 @@ def _pq_rel(ctx):
 
 def _count_check(code, qs, lo, hi, key=None, chapter=None, doc=None):
     n = len(qs)
+    if n == 0:
+        return result(code, REVIEW, "No questions were recognised in this document, so the count cannot be checked. Its question "
+                                    "format may not be supported (recognised: '1.', '1)', 'Q1.', 'Q.1', 'Question 1:', '(1)', "
+                                    "automatic numbering, questions in tables)", lesson=key, chapter=chapter, doc=doc)
     if n and not numbering_is_regular(qs):
         return result(code, REVIEW, f"Question numbers run {[q.num for q in qs]}, not 1..n, so the document nests or restarts "
                                     f"numbering and the question count ({lo}-{hi} expected) is not decidable by code",
@@ -209,6 +216,13 @@ def data_bank_checks(ctx):
                 out.append(result(code, REVIEW, "No Data Bank document in the package", lesson=k))
         return out, None
     items = load_bank_items(bank.abs, ctx.profile)
+    if not items:
+        for k in keys:
+            for code in ("DB1", "DB2", "DB3", "DB4", "DB5"):
+                out.append(result(code, REVIEW, "No Data Bank items were recognised. Items are expected as two-column tables whose "
+                                                "first column uses the field names in the profile (vocab.data_bank_fields)",
+                                  lesson=k, doc=bank.rel))
+        return out, (bank, items)
     # group items by (chapter, bank lesson number) in document order
     lessons = []
     for it in items:
