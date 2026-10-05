@@ -59,6 +59,8 @@ class Question:
     check_marked: bool = False
     block: str = ""
     inline_options: int = 0
+    source: str = "rules"          # 'rules' or 'model'
+    meta: Optional[dict] = None    # verification stats when source == 'model'
 
 
 def question_regex(profile, labelled=False):
@@ -143,13 +145,20 @@ def parse_questions(info, profile, lo: int = 0, hi: Optional[int] = None):
                 if m:
                     starts.append((p.idx, int(m.group(1))))
         starts.sort()
+    return questions_from_starts(info, starts, hi)
+
+
+def questions_from_starts(info, starts, hi: Optional[int] = None, source: str = "rules"):
+    """Build Question objects from [(paragraph index, number|None)] question starts.
+    An entry with number None only marks where the previous question ends. Used by the
+    rule-based parser and by the model fallback, so both produce identical objects."""
     questions = []
     for i, (idx, num) in enumerate(starts):
         if num is None:
             continue
         end = starts[i + 1][0] if i + 1 < len(starts) else (hi if hi is not None else len(info.paras))
         block_paras = [p for p in info.paras if idx <= p.idx < end]
-        q = Question(num=num, text=block_paras[0].text.strip(), start=idx, end=end)
+        q = Question(num=num, text=block_paras[0].text.strip(), start=idx, end=end, source=source)
         q.block = "\n".join(p.text for p in block_paras)
         for p in block_paras[1:]:
             if not p.in_table and OPTION_START.match(p.text.strip()):

@@ -20,14 +20,24 @@ def _summary_rows(rules):
     return rows
 
 
-def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name):
+def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name, model=None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if model is None:
+        model_line = "Off. Every result came from the rule-based parser."
+    else:
+        used = [s for s in res.model_stats if s.get("usable") and not s.get("cached")]
+        cached = [s for s in res.model_stats if s.get("usable") and s.get("cached")]
+        failed = [s for s in res.model_stats if not s.get("usable")]
+        model_line = (f"{model.mode} mode, {model.client.model} at {model.client.url}. "
+                      f"{len(used) + len(cached)} document region(s) recovered ({len(cached)} from cache), "
+                      f"{len(failed)} could not be recovered. Findings from it are tagged [model-assisted].")
     meta = {
         "Package": zip_name,
         "Reviewed at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "Checklist workbook": f"{Path(checklist_path).name} (sha1 {workbook.file_sha1(checklist_path)})",
         "Rule overrides": "None. The workbook is followed as written.",
+        "Model fallback": model_line,
         "Documents classified": len(pkg.docs),
         "Files not classified": len(pkg.unclassified),
         "How to read the checklist sheets": "Pass/Fail/N/A were decided by code. A blank cell was not decided; the Notes column says why.",
@@ -41,6 +51,7 @@ def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name):
         "inventory": res.inventory,
         "subject_level": {c: {"status": s, "note": n, "documents": [f.to_dict() for f in fs]} for c, (s, n, fs) in res.subject.items()},
         "findings": [f.to_dict() for f in res.findings],
+        "model_calls": res.model_stats,
         "automation": {c: {"level": AUTOMATION.get(c, ("no", ""))[0], "how": AUTOMATION.get(c, ("no", ""))[1]} for c in rules},
     }
     (out / "review.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf8")

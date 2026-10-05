@@ -10,8 +10,34 @@ from difflib import SequenceMatcher
 
 from ..models import FAIL, NA, PASS, REVIEW, LessonKey
 from ..questions import (BankItem, load_bank_items, numbering_is_regular, parse_questions, segment_lessons, para_is_highlighted)
+from ..fallback import recover_questions
 from ..textutil import dominant_script, normalize, to_western_digits
 from .common import result
+
+
+def _policy_one(ctx, f, summary):
+    """A finding built on model-recovered questions is never a silent result.
+    'suggest': a Pass/Fail becomes a needs-review suggestion that says what it would be.
+    'decide': a Fail is written as a Fail; a Pass stays a partial pass (blank in the workbook)."""
+    if f.status not in (PASS, FAIL):
+        return f
+    f.method = "model"
+    tag = f"[model-assisted] {summary}. "
+    if ctx.model.mode == "decide":
+        f.message = tag + f.message
+        if f.status == PASS:
+            f.partial = True
+    else:
+        f.message = tag + f"Would be {f.status}: " + f.message
+        f.status, f.partial = REVIEW, False
+    f.evidence = [summary] + list(f.evidence)
+    return f
+
+
+def _model_policy(ctx, findings, qs, summary):
+    if ctx.model is None or not any(q.source == "model" for q in qs):
+        return findings
+    return [_policy_one(ctx, f, summary) for f in findings]
 
 # ------------------------------------------------------------------ shared
 
@@ -61,7 +87,12 @@ def align_pop_quiz(ctx):
         for h in grp:
             variant = h["variant"] if (h["num"], h["variant"]) in pkg_keys[ch] else ""
             key = LessonKey(ch, h["num"], variant)
-            mapping[key] = parse_questions(info, ctx.profile, h["start"] + 1, h["end"])
+            qs = parse_questions(info, ctx.profile, h["start"] + 1, h["end"])
+            if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
+                recovered, _ = recover_questions(info, ctx.model, pq, h["start"] + 1, h["end"])
+                if recovered:
+                    qs = recovered
+            mapping[key] = qs
     if not any(mapping.values()):
         return {}, info, ("No questions were recognised anywhere in the Pop Quiz, so its question format may not be supported "
                           "(recognised: '1.', '1)', 'Q1.', 'Q.1', 'Question 1:', '(1)', automatic numbering)")
@@ -126,6 +157,15 @@ def pop_quiz_checks(ctx):
             out.append(result("PQ4", FAIL, f"Correct answer is not highlighted yellow on question(s) {nohl}{extra}", lesson=key, doc=_pq_rel(ctx)))
         else:
             out.append(result("PQ4", PASS, "Correct answer highlighted yellow on every question", lesson=key, doc=_pq_rel(ctx)))
+    if ctx.model is not None:
+        for key, qs in mapping.items():
+            meta = next((q.meta for q in qs if q.source == "model" and q.meta), None)
+            if meta:
+                summary = (f"model {meta['model']}: {meta['recognised']} question(s) recognised, {meta['proposed']} proposed, "
+                           f"{meta['rejected']} rejected by verification")
+                for f in out:
+                    if f.lesson == key:
+                        _policy_one(ctx, f, summary)
     return out
 
 
@@ -168,7 +208,13 @@ def _tag_check(ctx, code, qs, info, key=None, chapter=None, doc=None):
 def exam_checks(ctx, doc, info, doc_type):
     """CE1/CE4 on a per-lesson Chapter Exam; WS1/WS2/WS3/WS6 on a per-chapter Worksheet."""
     qs = parse_questions(info, ctx.profile)
-    out = []
+    out, summary, why_not = [], "", ""
+    if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
+        recovered, summary = recover_questions(info, ctx.model, doc)
+        if recovered:
+            qs = recovered
+        else:
+            why_not = summary
     if doc_type == "chapter_exam":
         out.append(_count_check("CE1", qs, 6, 8, key=doc.key, doc=doc.rel))
         out.append(_tag_check(ctx, "CE4", qs, info, key=doc.key, doc=doc.rel))
@@ -180,7 +226,11 @@ def exam_checks(ctx, doc, info, doc_type):
                           chapter=doc.chapter, doc=doc.rel))
         out.append(_tag_check(ctx, "WS3", qs, info, chapter=doc.chapter, doc=doc.rel))
         out.append(_ws6(ctx, doc, info, qs))
-    return out
+    if why_not:
+        for f in out:
+            if f.status == REVIEW:
+                f.evidence.append("Model fallback did not help: " + why_not)
+    return _model_policy(ctx, out, qs, summary)
 
 
 def _ws6(ctx, doc, info, qs):

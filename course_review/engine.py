@@ -24,8 +24,9 @@ LESSON_SHEETS = {  # sheet name -> output type in the workbook Key sheet
 
 
 class Context:
-    def __init__(self, pkg, profile, rules):
+    def __init__(self, pkg, profile, rules, model=None):
         self.pkg, self.profile, self.rules = pkg, profile, rules
+        self.model = model          # fallback.ModelConfig or None (model fallback off)
         self.th = profile["thresholds"]
         self.section_labels = [l for s in profile["lesson_plan_sections"] for l in s["labels"]]
         self._cache, self.errors = {}, {}
@@ -108,9 +109,9 @@ class Results:
         self.errors = {}
 
 
-def run(pkg, profile, rules, layout):
+def run(pkg, profile, rules, layout, model=None):
     _collapse_lessonless_chapters(pkg)
-    ctx = Context(pkg, profile, rules)
+    ctx = Context(pkg, profile, rules, model)
     res = Results()
     F = res.findings
     formatted = [d for d in pkg.docs if d.doc_type in profile["formatted_types"] and not d.superseded and d.ext in ("docx", "pptx")]
@@ -260,5 +261,6 @@ def run(pkg, profile, rules, layout):
         "counts": dict(Counter(d.doc_type for d in pkg.docs)),
     }
     res.errors = ctx.errors
+    res.model_stats = list(model.stats) if model is not None else []
     res.lesson_keys, res.chapters = lesson_keys, chapters
     return res

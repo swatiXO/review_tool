@@ -63,6 +63,42 @@ course_review/
 tests/            48 tests on generated documents plus one end-to-end review
 ```
 
+## Model fallback (optional)
+
+The rule-based parser recognises the common question formats. For a document whose questions
+it does not recognise (or whose numbering it cannot trust), a local model can propose where
+the questions start. The model only **proposes**: every proposal is checked in code against
+the document (the paragraph must exist and the quoted words must be in it), proposals that
+fail are discarded, and an extraction with more than 30% rejected is thrown away. Answers are
+cached per file and model, so a re-run gives the same result.
+
+```bash
+# the model is reached through your Ollama link (ngrok is fine); nothing else leaves the machine
+set OLLAMA_URL=https://your-link.ngrok-free.dev        # PowerShell: $env:OLLAMA_URL = "..."
+set OLLAMA_MODEL=qwen3:14b
+
+python -m course_review.cli check-model
+python -m course_review.cli review PACKAGE.zip --checklist X.xlsx --model-fallback suggest
+```
+
+* `suggest` (recommended): results that depend on the model are written as needs-review
+  suggestions ("Would be pass: ..."), so a model answer is never a Pass or Fail in the workbook.
+* `decide`: a Fail found with model help is written as a Fail; a Pass stays a partial pass
+  (blank in the workbook). Everything is tagged `[model-assisted]`.
+* With the model off (the default), behaviour is exactly as before.
+* If the link is down the run stops with a clear message, rather than quietly reviewing without it.
+
+Measure a model before relying on it:
+
+```bash
+python -m course_review.cli eval-model PACKAGE.zip --limit 8 [--labels hand-counts.json]
+python -m pytest tests/test_live_model.py -v -s          # needs OLLAMA_URL; skipped otherwise
+```
+
+Small models are not good enough: in a quick check on one document, a 3B model found nothing,
+while 8B and 14B models found all questions with none invented. They also took 1-2 minutes per
+document on a CPU-only machine, so a GPU host matters.
+
 ## Known limits
 
 * Phase 1 only. The AI-assisted checks are not built.
