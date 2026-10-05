@@ -1,0 +1,260 @@
+"""Extract questions from Pop Quiz / exam / worksheet documents and items from a Data Bank.
+
+Everything language-specific (prefixes, option letters, field names) comes from the
+profile vocabulary, so a new subject or language needs a profile change, not code.
+"""
+import re
+from dataclasses import dataclass, field
+from typing import Optional
+
+from docx import Document
+from docx.oxml.ns import qn
+
+from .textutil import normalize, to_western_digits
+
+CHECKS = "✅✔☑"
+OPTION_START = re.compile(r"^\s*[✅✔☑]?\s*(?:الف|ب|ج|د|[A-Da-d])\s*[).]")
+OPTION_INLINE = re.compile(r"(?:^|\s)[✅✔☑]?\s*(?:الف|ب|ج|د|[A-Da-d])\s*\)")
+
+
+def is_yellow(hex_fill: Optional[str]) -> bool:
+    if not hex_fill or hex_fill.lower() in ("auto", "none"):
+        return False
+    h = hex_fill.lstrip("#")
+    if len(h) != 6:
+        return False
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return False
+    return r >= 200 and g >= 190 and b <= 170
+
+
+def run_is_highlighted(run) -> bool:
+    return (run.highlight or "").lower() == "yellow" or is_yellow(run.shading)
+
+
+def para_is_highlighted(p) -> bool:
+    return any(run_is_highlighted(r) for r in p.runs) or is_yellow(p.shading)
+
+
+@dataclass
+class Option:
+    text: str
+    highlighted: bool
+    check: bool
+
+
+@dataclass
+class Question:
+    num: int
+    text: str
+    start: int
+    end: int
+    options: list = field(default_factory=list)
+    qtype: str = "open"
+    highlighted: bool = False
+    check_marked: bool = False
+    block: str = ""
+    inline_options: int = 0
+
+
+def question_regex(profile, labelled=False):
+    """A question start: optional label (سوال / Question) + number + separator.
+    labelled=True requires the label, used inside tables where bare numbers are answers."""
+    prefixes = "|".join(re.escape(normalize(p)) for p in profile["vocab"]["question_prefixes"])
+    label = rf"(?:(?:{prefixes})\s*[.:\-–—]?\s*)"
+    sep = r"(?:[-–—:.)\]۔]|\s-\s)" if not labelled else r"(?:[-–—:.)\]۔(]|\s-\s)"
+    head = label if labelled else label + "?"
+    return re.compile(rf"^\s*{head}(\d{{1,3}})\s*{sep}\s*(\S.*)?$", re.I | re.S)
+
+
+def table_question_regex(profile):
+    """Inside a table a question cell reads 'سوال 1  قسم: ...': label + number, no separator."""
+    prefixes = "|".join(re.escape(normalize(p)) for p in profile["vocab"]["question_prefixes"])
+    return re.compile(rf"^\s*(?:{prefixes})\s*[.:\-–—]?\s*(\d{{1,3}})\b", re.I)
+
+
+def lesson_heading_regex(profile):
+    prefixes = "|".join(re.escape(normalize(p)) for p in profile["vocab"]["lesson_heading_prefixes"])
+    return re.compile(rf"^\s*(?:{prefixes})\s*(\d+)\s*(?:\(\s*([^)]*?)\s*\))?", re.I)
+
+
+def classify_type(block: str, option_count: int) -> str:
+    n = normalize(block).lower()
+    if option_count >= 3:
+        return "mcq"
+    if re.search(r"درست\s*(?:یا|/)\s*غلط|true\s*/?\s*(?:or)?\s*false", n):
+        return "true_false"
+    if "____" in block or "خالی جگہ" in n or "fill in" in n:
+        return "fill_blank"
+    if "جوڑ" in n or "match" in n:
+        return "matching"
+    return "open"
+
+
+def parse_questions(info, profile, lo: int = 0, hi: Optional[int] = None):
+    """Questions among paragraphs with index in [lo, hi). Table paragraphs only count
+    when they carry an explicit question label."""
+    qre = question_regex(profile)
+    qre_lab = question_regex(profile, labelled=True)
+    qre_tab = table_question_regex(profile)
+    lre = lesson_heading_regex(profile)
+    end_labels = [normalize(x).lower() for x in profile["vocab"].get("question_region_end_labels", [])]
+    paras = [p for p in info.paras if p.idx >= lo and (hi is None or p.idx < hi)]
+    starts, seen_q = [], False
+    for p in paras:
+        t = to_western_digits(normalize(p.text))
+        if not t:
+            continue
+        # teacher guidance / answer sections after the questions are not questions
+        if seen_q and not p.in_table and len(t) <= 90 and any(t.lower().startswith(l) for l in end_labels):
+            hi = p.idx
+            starts.append((p.idx, None))
+            break
+        if not p.in_table and lre.match(t) and not OPTION_START.match(t):
+            starts.append((p.idx, None))  # a lesson heading ends the previous question
+            continue
+        if p.heading_level == 1 and not p.in_table:
+            starts.append((p.idx, None))  # so does a top-level heading
+            continue
+        m = qre_lab.match(t)
+        labelled = bool(m)
+        if m is None and p.in_table:
+            m = qre_tab.match(t)
+            labelled = bool(m)
+        if m is None and not p.in_table:
+            m = qre.match(t)
+        if m and not OPTION_START.match(t):
+            starts.append((p.idx, int(m.group(1)), labelled))
+            seen_q = True
+    # header lines such as '31: lesson title' before the first labelled question are not questions
+    first_lab = next((st[0] for st in starts if len(st) == 3 and st[2]), None)
+    if first_lab is not None:
+        starts = [st for st in starts if len(st) == 2 or st[2] or st[0] > first_lab]
+    starts = [(st[0], st[1]) for st in starts]
+    questions = []
+    for i, (idx, num) in enumerate(starts):
+        if num is None:
+            continue
+        end = starts[i + 1][0] if i + 1 < len(starts) else (hi if hi is not None else len(info.paras))
+        block_paras = [p for p in info.paras if idx <= p.idx < end]
+        q = Question(num=num, text=block_paras[0].text.strip(), start=idx, end=end)
+        q.block = "\n".join(p.text for p in block_paras)
+        for p in block_paras[1:]:
+            if not p.in_table and OPTION_START.match(p.text.strip()):
+                q.options.append(Option(p.text.strip(), para_is_highlighted(p), any(c in p.text for c in CHECKS)))
+        q.inline_options = len(OPTION_INLINE.findall(q.block)) if not q.options else 0
+        count = len(q.options) or q.inline_options
+        q.qtype = classify_type(q.block, count)
+        q.highlighted = any(o.highlighted for o in q.options) or (
+            q.inline_options >= 3 and any(para_is_highlighted(p) for p in block_paras))
+        q.check_marked = any(c in q.block for c in CHECKS)
+        questions.append(q)
+    return questions
+
+
+def numbering_is_regular(questions) -> bool:
+    """Questions are numbered 1..n once each; anything else means the document
+    nests numbered sub-questions or restarts numbering, and the count is ambiguous."""
+    return [q.num for q in questions] == list(range(1, len(questions) + 1))
+
+
+def segment_lessons(info, profile):
+    """Split a multi-lesson document (Pop Quiz) into chapter groups of lessons.
+
+    Lesson numbers restart in each chapter, so a number that goes down (or repeats
+    without a part letter) starts a new group. Returns
+    [ [ {num, variant, start, end, title}, ... ], ... ]"""
+    lre = lesson_heading_regex(profile)
+    letters = {normalize(k): v for k, v in profile["vocab"]["variant_letters"].items()}
+    heads = []
+    for p in info.paras:
+        if p.in_table:
+            continue
+        t = to_western_digits(normalize(p.text))
+        m = lre.match(t)
+        if m and len(t) < 160 and not OPTION_START.match(t):
+            raw = normalize(m.group(2) or "")
+            heads.append({"num": int(m.group(1)), "variant": letters.get(raw, raw.upper()[:1] if raw.isascii() else ""),
+                          "start": p.idx, "title": p.text.strip()})
+    for i, h in enumerate(heads):
+        h["end"] = heads[i + 1]["start"] if i + 1 < len(heads) else len(info.paras)
+    groups, prev = [], None
+    for h in heads:
+        new = prev is None or h["num"] < prev["num"] or (h["num"] == prev["num"] and not h["variant"] and not prev["variant"])
+        if new:
+            groups.append([])
+        groups[-1].append(h)
+        prev = h
+    return groups
+
+
+def chapter_from_text(text: str, profile) -> Optional[int]:
+    """'باب دوم: ...' or 'Chapter 3' -> chapter number."""
+    t = to_western_digits(normalize(text))
+    m = re.search(r"(?:chapter|باب)\s*(\d+)", t, re.I)
+    if m:
+        return int(m.group(1))
+    for n, words in profile["vocab"]["chapter_ordinals"].items():
+        for w in words:
+            if re.search(rf"(?:chapter|باب)\s*{re.escape(normalize(w))}\b", t, re.I):
+                return int(n)
+    return None
+
+
+# ----------------------------------------------------------------- data bank
+
+
+@dataclass
+class BankItem:
+    chapter: Optional[int]
+    lesson_no: Optional[int]
+    fields: dict            # canonical field -> text
+    present: set            # canonical fields that exist as keys
+    highlighted: bool
+    raw_keys: list
+    order: int
+
+
+def _canon_map(profile):
+    out = {}
+    for canon, names in profile["vocab"]["data_bank_fields"].items():
+        for n in names:
+            out[normalize(n).lower()] = canon
+    return out
+
+
+def load_bank_items(path, profile):
+    doc = Document(path)
+    cmap = _canon_map(profile)
+    items = []
+    for ti, t in enumerate(doc.tables):
+        fields, present, raw_keys, hl = {}, set(), [], False
+        for row in t.rows:
+            cells = row.cells
+            if len(cells) < 2:
+                continue
+            key = normalize(cells[0].text).lower()
+            raw_keys.append(cells[0].text.strip())
+            canon = cmap.get(key)
+            if canon is None:
+                continue
+            present.add(canon)
+            fields[canon] = cells[1].text.strip()
+            if canon in ("options", "answer"):
+                tc = cells[1]._tc
+                if any((h.get(qn("w:val")) or "").lower() == "yellow" for h in tc.iter(qn("w:highlight"))) or \
+                        any(is_yellow(s.get(qn("w:fill"))) for s in tc.iter(qn("w:shd"))):
+                    hl = True
+        if not present:
+            continue
+        chapter = lesson_no = None
+        cl = fields.get("chapter_lesson", "")
+        if cl:
+            parts = re.split(r"\s*/\s*|\n", cl)
+            chapter = chapter_from_text(parts[0], profile)
+            m = re.match(r"\s*(\d+)", to_western_digits(normalize(parts[1] if len(parts) > 1 else "")))
+            lesson_no = int(m.group(1)) if m else None
+        items.append(BankItem(chapter, lesson_no, fields, present, hl, raw_keys, ti))
+    return items

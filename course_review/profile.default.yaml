@@ -1,0 +1,90 @@
+# Package profile: everything that is a convention of the course package rather than a
+# checklist rule. The checklist workbook stays the source of rule wording and thresholds
+# that it states (counts, sizes, fonts). This file only says how to recognise things.
+
+# First match wins. `pattern` is a case-insensitive regex tried on the file name (no extension).
+# `scope` says which checklist scope the document answers. File names are only a hint:
+# a file is bound to a checklist sheet by the scope the workbook gives that sheet.
+doc_types:
+  - {type: video_storyboard, pattern: 'story\s*board', ext: [docx]}
+  - {type: lesson_plan, pattern: 'lesson[-_ ]*plan', ext: [docx], scope: lesson}
+  - {type: facilitator_guide, pattern: 'facilitator[-_ ]*guide|lesson[-_ ]*slides', ext: [pptx], scope: lesson}
+  - {type: pop_quiz, pattern: 'pop[-_ ]*quiz', ext: [docx], scope: subject}
+  - {type: data_bank, pattern: 'data[-_ ]*bank', ext: [docx], scope: subject}
+  - {type: specification, pattern: 'specification', ext: [docx], scope: subject}
+  # Workbook: Chapter Exam is per lesson, Worksheet is per chapter.
+  - {type: chapter_exam, pattern: 'assessment', ext: [docx], scope: lesson}
+  - type: worksheet
+    pattern: 'chapter[-_ ]*exam'
+    ext: [docx]
+    scope: chapter
+    note: "File name says 'Chapter Exam' but it is per chapter, which the workbook defines as a Worksheet."
+  - {type: textbook, pattern: 'book', ext: [pdf]}
+
+path_patterns:
+  chapter: '(?i)(?:chapter|chpater|chapt\w*)[-_ ]*(\d+)'
+  lesson: '(?i)lesson[-_ ]*(\d+)'
+
+# Document types the Writing & Editing Guidelines apply to (subject-level WE rules).
+formatted_types: [lesson_plan, facilitator_guide, video_storyboard, pop_quiz, data_bank, specification, chapter_exam, worksheet]
+
+# Words that identify the five mandatory Lesson Plan sections (LP3, WE14), per language.
+lesson_plan_sections:
+  - key: introduction
+    labels: ["Introduction", "تعارف"]
+  - key: slos
+    labels: ["SLOs", "Student Learning Outcomes", "Learning Outcomes", "حاصلات تعلیم"]
+  - key: warm_up
+    labels: ["Warm-up", "Warm up", "Warmup", "تحریکی سرگرمی"]
+  - key: concept_building
+    labels: ["Concept Building", "تصوراتی تعمیر"]
+  - key: key_takeaways
+    labels: ["Key Takeaways", "حاصل کلام"]
+
+# Vocabulary used to recognise things inside question documents.
+vocab:
+  question_prefixes: ["question", "q", "سوال", "سوال نمبر"]
+  lesson_heading_prefixes: ["lesson", "سبق"]
+  chapter_ordinals:           # for headings like "باب دوم"
+    1: ["اول", "first", "one"]
+    2: ["دوم", "second", "two"]
+    3: ["سوم", "third", "three"]
+    4: ["چہارم", "fourth", "four"]
+    5: ["پنجم", "fifth", "five"]
+    6: ["ششم", "sixth", "six"]
+    7: ["ہفتم", "seventh", "seven"]
+    8: ["ہشتم", "eighth", "eight"]
+    9: ["نہم", "ninth", "nine"]
+    10: ["دہم", "tenth", "ten"]
+  variant_letters: {"الف": "A", "ب": "B", "ج": "C", "د": "D"}
+  question_region_end_labels: ["اساتذہ", "Teacher", "Facilitator", "رہنمائے", "تشخیصی رہنمائی", "Answer Key", "Marking guide", "جوابات", "Guidance"]
+  slo_tag_patterns: ['\bSLO\b', 'حاصلات? ?تعلیم', '[A-Z]-\d{2}-[A-Z]-\d{2}']
+  lesson_plan_location_labels: ["Lesson Plan Location"]      # add Urdu wording here when known
+  feedback_labels: ["Correct feedback", "Incorrect feedback"] # add Urdu wording here when known
+  answer_key_labels: ["Answer Key", "Answers", "جوابات", "جواب نامہ", "کلید جوابات"]
+  caption_prefixes:
+    table: ["Table", "جدول"]
+    figure: ["Figure", "Fig.", "شکل"]
+  mcq_types: ["کثیر الانتخابی سوال", "MCQ", "Multiple choice", "Multiple choice question"]
+  data_bank_fields:
+    chapter_lesson: ["باب / سبق", "Chapter / Lesson"]
+    subject: ["مضمون", "Subject"]
+    chapter: ["باب", "Chapter"]
+    lesson: ["سبق", "Lesson"]
+    slo: ["حاصلات تعلیم", "SLO", "SLO Code", "SLOs"]
+    question_type: ["قسم سوال", "Question type", "Type"]
+    level: ["سطح", "Level"]
+    question: ["سوال / محرک", "Question"]
+    options: ["اختیارات / تعامل کا مواد", "Options"]
+    answer: ["مثالی جواب", "Answer", "Correct answer"]
+    feedback_correct: ["درست جواب کا فیڈبیک", "Correct feedback"]
+    feedback_incorrect: ["غلط جواب کا فیڈبیک", "Incorrect feedback"]
+  # Workbook says "lower-order only" without defining it. Bloom's lower-order levels:
+  lower_order_levels: ["یاد کرنا", "سمجھنا", "اطلاق", "Remember", "Understand", "Apply"]
+
+# Thresholds the workbook does not state.
+thresholds:
+  text_size_tolerance: 0.02       # share of text allowed to deviate from a font size rule
+  min_image_dpi: 150              # "high-res images" (WE19) is not quantified in the workbook
+  duplicate_similarity: 0.85      # DB5 near-duplicate check
+  colour_grey_tolerance: 14       # max channel spread still counted as grey
