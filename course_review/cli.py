@@ -17,19 +17,21 @@ from . import engine, fallback, ingest, report, workbook
 from .llm import OllamaClient
 
 
-def make_model(mode, url=None, model=None, cache_dir=".course_review_cache"):
-    """A ModelConfig, or None when mode is 'off'. Raises SystemExit with a clear message
-    if the server cannot be reached, so a run never silently loses its model."""
+def make_model(mode, url=None, model=None, cache_dir=".course_review_cache", judge=False, codes=None):
+    """A ModelConfig, or None when mode is 'off' and no model checks are requested. Raises SystemExit
+    with a clear message if the server cannot be reached, so a run never silently loses its model."""
+    if judge and mode == "off":
+        mode = "suggest"
     if mode == "off":
         return None
     client = OllamaClient(url=url, model=model)
     ok, msg = client.available()
     if not ok:
         raise SystemExit(f"Model fallback requested but the model server is not usable: {msg}")
-    return fallback.ModelConfig(client=client, cache=fallback.Cache(cache_dir), mode=mode)
+    return fallback.ModelConfig(client=client, cache=fallback.Cache(cache_dir), mode=mode, judge=judge, codes=codes)
 
 
-def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None):
+def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None):
     t0 = time.time()
     profile = ingest.load_profile(profile_path)
     rules, layout = workbook.load_rules(checklist)
@@ -37,7 +39,7 @@ def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=No
     try:
         dest = ingest.safe_extract(zip_path, work)
         pkg = ingest.classify(ingest.find_root(dest), profile)
-        res = engine.run(pkg, profile, rules, layout, model=model)
+        res = engine.run(pkg, profile, rules, layout, model=model, book=book)
         xlsx = report.write_outputs(pkg, res, rules, layout, checklist, out_dir, Path(zip_path).name, model=model)
     finally:
         if not keep:
@@ -64,7 +66,20 @@ def main(argv=None):
                    help="use a local model for question formats the parser does not recognise. "
                         "suggest: model answers are shown as needs-review suggestions; "
                         "decide: model-based Fails are also written to the workbook")
+    r.add_argument("--model-checks", nargs="?", const="all", metavar="CODES",
+                   help="also run the model-assisted judgement checks (LP1, LP2, LP6, LP7, LP8, LP9, FG1, FG3, FG6, CE2, CE3, "
+                        "and SLO mapping for PQ5/WS5). Optionally a comma list, e.g. LP1,FG1. Results are suggestions only.")
+    r.add_argument("--book-index", help="folder made by index-book; lets LP2, LP8, CE2 and CE3 consult the textbook")
     _model_args(r)
+
+    b = sub.add_parser("index-book", help="OCR the textbook PDF into a searchable page index (resumable)")
+    b.add_argument("pdf")
+    b.add_argument("--out", default="book_index", help="folder for the index")
+    b.add_argument("--engine", choices=["tesseract", "vlm", "auto"], default="tesseract")
+    b.add_argument("--pages", help="e.g. 1-20,40 (default: all pages)")
+    b.add_argument("--dpi", type=int, default=200)
+    b.add_argument("--lang", default="urd+eng", help="Tesseract languages")
+    _model_args(b)
 
     c = sub.add_parser("check-model", help="check the model server is reachable and has the model")
     _model_args(c)
@@ -78,6 +93,19 @@ def main(argv=None):
 
     a = ap.parse_args(argv)
 
+    if a.cmd == "index-book":
+        from . import book as bk
+        client = None
+        if a.engine == "vlm":
+            client = OllamaClient(url=a.model_url, model=a.model or "qwen3-vl:8b", timeout=1800)
+            ok, msg = client.available()
+            if not ok:
+                raise SystemExit(f"The vision model server is not usable: {msg}")
+        done = bk.build_index(a.pdf, a.out, a.engine, a.pages, a.dpi, a.lang, client,
+                              progress=lambda p, n: print(f"  page {p} done ({n} requested)", flush=True))
+        print(f"Indexed {len(done)} page(s) into {a.out}")
+        return
+
     if a.cmd == "check-model":
         ok, msg = OllamaClient(url=a.model_url, model=a.model).available()
         print(("OK: " if ok else "NOT USABLE: ") + msg)
@@ -89,8 +117,15 @@ def main(argv=None):
         evaluate.run(a.package, model, a.limit, a.json, a.labels)
         return
 
-    model = make_model(a.model_fallback, a.model_url, a.model, a.cache_dir)
-    pkg, res, xlsx, secs = review(a.package, a.checklist, a.out, a.profile, model=model)
+    judge = a.model_checks is not None
+    codes = None if (a.model_checks in (None, "all")) else {c.strip().upper() for c in a.model_checks.split(",") if c.strip()}
+    model = make_model(a.model_fallback, a.model_url, a.model, a.cache_dir, judge=judge, codes=codes)
+    book_index = None
+    if a.book_index:
+        from .book import BookIndex
+        book_index = BookIndex.load(a.book_index)
+        print(f"Textbook index: {len(book_index.pages)} page(s) from {a.book_index}")
+    pkg, res, xlsx, secs = review(a.package, a.checklist, a.out, a.profile, model=model, book=book_index)
     c = Counter(f.status for f in res.findings)
     print(f"Reviewed {len(pkg.docs)} documents in {secs:.0f}s: {c['fail']} fails, {c['pass']} passes, "
           f"{c['needs_review']} need review, {c['na']} n/a")

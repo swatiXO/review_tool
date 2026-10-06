@@ -216,3 +216,8 @@ class ModelConfig:
     cache: object = None
     mode: str = "suggest"              # 'suggest': model answers need confirming; 'decide': Fails are written
     stats: list = field(default_factory=list)
+    judge: bool = False                # also run the model-assisted judgement checks (judgement.py)
+    codes: object = None               # None = every judgement check, or a set of codes such as {"LP1", "FG1"}
+
+    def wants(self, code: str) -> bool:
+        return self.judge and (self.codes is None or code in self.codes)

@@ -16,7 +16,7 @@ def _summary_rows(rules):
     rows = []
     for code, rule in rules.items():
         level, how = AUTOMATION.get(code, ("no", "No implementation is bound to this code"))
-        rows.append((code, {"yes": "Yes", "partly": "Partly", "no": "No"}[level], how, rule.text))
+        rows.append((code, {"yes": "Yes", "partly": "Partly", "model": "Suggestion", "no": "No"}[level], how, rule.text))
     return rows
 
 
@@ -29,7 +29,8 @@ def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name, mo
         used = [s for s in res.model_stats if s.get("usable") and not s.get("cached")]
         cached = [s for s in res.model_stats if s.get("usable") and s.get("cached")]
         failed = [s for s in res.model_stats if not s.get("usable")]
-        model_line = (f"{model.mode} mode, {model.client.model} at {model.client.url}. "
+        checks = ("model checks: " + ("all" if model.codes is None else ",".join(sorted(model.codes))) + ". ") if model.judge else ""
+        model_line = (f"{model.mode} mode, {model.client.model} at {model.client.url}. {checks}"
                       f"{len(used) + len(cached)} document region(s) recovered ({len(cached)} from cache), "
                       f"{len(failed)} could not be recovered. Findings from it are tagged [model-assisted].")
     meta = {
@@ -147,6 +148,6 @@ def _html(pkg, res, rules, layout, meta):
     parts.append("<section><h2>What the tool decides</h2><div class=scroll><table><tr><th>Code<th>By tool<th>How / why not<th>Rule</tr>")
     for code, rule in rules.items():
         level, how = AUTOMATION.get(code, ("no", "No implementation bound"))
-        parts.append(f"<tr><td>{code}<td>{ {'yes':'Yes','partly':'Partly','no':'No'}[level] }<td>{e(how)}<td>{e(rule.text)}</tr>")
+        parts.append(f"<tr><td>{code}<td>{ {'yes':'Yes','partly':'Partly','model':'Suggestion','no':'No'}[level] }<td>{e(how)}<td>{e(rule.text)}</tr>")
     parts.append("</table></div></section></main>")
     return "".join(parts)

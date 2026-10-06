@@ -8,17 +8,19 @@ status so the report can state it. A code missing from here is reported as
 AI = "Needs reading comprehension of the content (planned: local-model assisted checks)"
 HUMAN = "Needs a reviewer; not reliably decidable by code"
 PHASE2 = "Needs SLO extraction and question tagging across documents (planned)"
+SUGGEST = "Model-assisted suggestion (run with --model-checks and a local model). Shown as needs-review, never as Pass or Fail"
+BOOK = " Consults the textbook when --book-index is given."
 
 # code -> (level, how)   level: 'yes' | 'partly' | 'no'
 AUTOMATION = {
-    "LP1": ("no", AI), "LP2": ("no", AI + "; also needs the textbook"),
+    "LP1": ("model", SUGGEST), "LP2": ("model", SUGGEST + BOOK),
     "LP3": ("yes", "Section headings located by profile vocabulary and checked for presence and order"),
     "LP4": ("yes", "Heading numbers read (typed or automatic) and checked for levels, order and skipped levels"),
     "LP5": ("yes", "Items under the SLO heading checked for bullet list formatting"),
-    "LP6": ("no", AI), "LP7": ("no", AI), "LP8": ("no", HUMAN + " (needs the textbook)"), "LP9": ("no", AI),
+    "LP6": ("model", SUGGEST), "LP7": ("model", SUGGEST), "LP8": ("model", SUGGEST + " Needs --book-index, otherwise left to a reviewer."), "LP9": ("model", SUGGEST),
     "LP10": ("yes", "Derived from WE1-WE4 and WE6-WE8 on this lesson's Lesson Plan file"),
-    "FG1": ("no", AI), "FG2": ("partly", "Facilitator-notes part on each slide and no text copied from the Lesson Plan; the split itself needs a reviewer"), "FG3": ("no", AI), "FG4": ("no", AI + "; the five items are not defined in the workbook"),
-    "FG5": ("no", HUMAN), "FG6": ("no", AI), "FG7": ("partly", "Slide titles matched to the Lesson Plan sections; content under each needs a reviewer"),
+    "FG1": ("model", SUGGEST), "FG2": ("partly", "Facilitator-notes part on each slide and no text copied from the Lesson Plan; the split itself needs a reviewer"), "FG3": ("model", SUGGEST), "FG4": ("no", AI + "; the five items are not defined in the workbook"),
+    "FG5": ("no", HUMAN), "FG6": ("model", SUGGEST), "FG7": ("partly", "Slide titles matched to the Lesson Plan sections; content under each needs a reviewer"),
     "FG8": ("yes", "Derived from WE5-WE7 and WE23 on this lesson's Facilitator Guide file"),
     "PQ1": ("yes", "Questions counted per lesson section of the Pop Quiz; option letters used to detect MCQ"),
     "PQ2": ("partly", "Presence of a Lesson Plan Location line; precision needs a reviewer"),
@@ -26,7 +28,7 @@ AUTOMATION = {
     "PQ4": ("yes", "Yellow run highlight or yellow shading on a correct option; a check-mark symbol does not count"),
     "PQ5": ("partly", "SLOs from the Document of Specifications vs the SLO tags in the questions; untagged questions need a reviewer"),
     "CE1": ("partly", "Question count; the 70/30 split needs question levels"),
-    "CE2": ("no", AI + "; needs the textbook"), "CE3": ("no", AI), "CE4": ("yes", "SLO tag present in every question block"),
+    "CE2": ("model", SUGGEST + " Needs --book-index."), "CE3": ("model", SUGGEST + " Needs --book-index."), "CE4": ("yes", "SLO tag present in every question block"),
     "CE5": ("no", "Whether an answer key is expected is not decidable by code"),
     "DB1": ("yes", "Items per lesson, MCQ-only and lower-order-only, read from the Data Bank tables"),
     "DB2": ("yes", "Presence of Subject, Chapter, Lesson and SLO fields on every item"),

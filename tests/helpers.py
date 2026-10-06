@@ -78,7 +78,7 @@ def ref(rel="Pkg/Chapter-1/Lesson-1/Lesson-1-Chapter-1-Lesson-Plan.docx", doc_ty
                   lesson=kw.get("lesson", 1), scope=kw.get("scope", "lesson"))
 
 
-def checklist(tmp_path, codes_by_sheet=None):
+def checklist(tmp_path, extra_lp=()):
     """A miniature checklist workbook with the same layout as the real one."""
     wb = openpyxl.Workbook()
     wb.active.title = "Index"
@@ -91,11 +91,12 @@ def checklist(tmp_path, codes_by_sheet=None):
              ("LP5", "Lesson Plan", "Per lesson", "bullets"), ("LP10", "Lesson Plan", "Per lesson", "formatting"),
              ("PQ1", "Pop Quiz", "Per lesson", "count"), ("PQ4", "Pop Quiz", "Per lesson", "highlight"),
              ("WS1", "Worksheet", "Per chapter", "count"),
+             ("LP1", "Lesson Plan", "Per lesson", "slo coverage"), ("LP6", "Lesson Plan", "Per lesson", "warm-up"),
              ("WE1", "Writing & Editing Guidelines", "Per subject", "file name"),
              ("WE4", "Writing & Editing Guidelines", "Per subject", "page setup")]
     for r in rules:
         key.append(list(r))
-    for title, codes, scope in (("Lesson Plan", ["LP3", "LP4", "LP5", "LP10"], "lesson"), ("Pop Quiz", ["PQ1", "PQ4"], "lesson"),
+    for title, codes, scope in (("Lesson Plan", ["LP3", "LP4", "LP5", "LP10"] + list(extra_lp), "lesson"), ("Pop Quiz", ["PQ1", "PQ4"], "lesson"),
                                 ("Worksheet", ["WS1"], "chapter")):
         ws = wb.create_sheet(title)
         ws.append([title])

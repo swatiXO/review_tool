@@ -71,6 +71,19 @@ class OllamaClient:
             return False, f"model '{self.model}' is not installed on {self.url} (found: {', '.join(names[:6]) or 'none'})"
         return True, f"{self.model} at {self.url}"
 
+    def chat_vision(self, prompt: str, image_b64: str) -> str:
+        """Plain-text answer about one image (for OCR with a vision model)."""
+        payload = {
+            "model": self.model, "stream": False, "think": False,
+            "options": {"temperature": 0, "seed": self.seed, "num_ctx": self.num_ctx},
+            "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
+        }
+        t0 = time.time()
+        reply = self._request("/api/chat", payload)
+        self.calls += 1
+        self.seconds += time.time() - t0
+        return ((reply.get("message") or {}).get("content") or "").strip()
+
     def chat_json(self, system: str, user: str) -> dict:
         payload = {
             "model": self.model, "stream": False, "format": "json", "think": False,

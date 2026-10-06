@@ -8,7 +8,7 @@ up as 'not automated' in the summary.
 import re
 from collections import Counter, defaultdict
 
-from .checks import assessments, coverage, formatting, lessonplan, slides
+from .checks import assessments, coverage, formatting, judgement, lessonplan, slides
 from .checks.common import result
 from .checks.registry import AUTOMATION
 from .docx_model import parse_docx
@@ -24,8 +24,9 @@ LESSON_SHEETS = {  # sheet name -> output type in the workbook Key sheet
 
 
 class Context:
-    def __init__(self, pkg, profile, rules, model=None):
+    def __init__(self, pkg, profile, rules, model=None, book=None):
         self.pkg, self.profile, self.rules = pkg, profile, rules
+        self.book = book            # book.BookIndex or None (no textbook index)
         self.model = model          # fallback.ModelConfig or None (model fallback off)
         self.th = profile["thresholds"]
         self.section_labels = [l for s in profile["lesson_plan_sections"] for l in s["labels"]]
@@ -111,9 +112,9 @@ class Results:
         self.model_stats = []
 
 
-def run(pkg, profile, rules, layout, model=None):
+def run(pkg, profile, rules, layout, model=None, book=None):
     _collapse_lessonless_chapters(pkg)
-    ctx = Context(pkg, profile, rules, model)
+    ctx = Context(pkg, profile, rules, model, book)
     res = Results()
     F = res.findings
     formatted = [d for d in pkg.docs if d.doc_type in profile["formatted_types"] and not d.superseded and d.ext in ("docx", "pptx")]
@@ -165,6 +166,8 @@ def run(pkg, profile, rules, layout, model=None):
     for f in cov_findings:
         if f.code in ("ST1", "ST2"):
             doc_findings[f.code].append(f)
+    judgement.augment_coverage(ctx, F)
+    F.extend(judgement.judgement_findings(ctx))
 
     # 3. missing artifacts per lesson / chapter
     lesson_keys = sorted({d.key for d in pkg.docs if d.scope == "lesson" and d.chapter is not None}, key=lambda k: k.sort_key())
