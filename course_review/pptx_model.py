@@ -53,6 +53,7 @@ class PptxInfo:
     char_count: int = 0
     notes_chars: int = 0
     slides_text: list = field(default_factory=list)
+    footers: list = field(default_factory=list)     # (slide, kind 'ftr'|'sldNum'|'dt', text) of footer placeholders shown
 
 
 def _theme_color_map(prs):
@@ -179,6 +180,11 @@ def parse_pptx(path) -> PptxInfo:
         info.slides_text.append(SlideText(idx, title, texts, notes))
 
     for i, slide in enumerate(prs.slides, start=1):
+        for sh in slide.placeholders:
+            ph = sh._element.find(f".//{{http://schemas.openxmlformats.org/presentationml/2006/main}}ph")
+            kind = ph.get("type") if ph is not None else None
+            if kind in ("ftr", "sldNum", "dt"):
+                info.footers.append((i, kind, sh.text_frame.text.strip() if sh.has_text_frame else ""))
         walk_shapes(slide.shapes, i)
         collect_text(slide, i)
         if slide.has_notes_slide:

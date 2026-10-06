@@ -8,7 +8,7 @@ up as 'not automated' in the summary.
 import re
 from collections import Counter, defaultdict
 
-from .checks import assessments, coverage, formatting, judgement, lessonplan, slides
+from .checks import assessments, coverage, formatting, guidelines, judgement, lessonplan, slides
 from .checks.common import result
 from .checks.registry import AUTOMATION
 from .docx_model import parse_docx
@@ -31,6 +31,7 @@ class Context:
         self.th = profile["thresholds"]
         self.section_labels = [l for s in profile["lesson_plan_sections"] for l in s["labels"]]
         self._cache, self.errors = {}, {}
+        self.decided = set()        # (code, LessonKey) already decided by code
 
     def _load(self, doc, parser):
         if doc.rel in self._cache:
@@ -135,6 +136,12 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
             f.lesson = d.key if d.scope == "lesson" and d.chapter is not None else None
             F.append(f)
             doc_findings[code].append(f)
+        for f in guidelines.doc_checks(ctx, d, info):
+            f.doc = d.rel
+            f.lesson = d.key if d.scope == "lesson" and d.chapter is not None else None
+            F.append(f)
+            if f.status in (PASS, FAIL) and f.lesson is not None:
+                ctx.decided.add((f.code, f.lesson))     # the model is not asked about what the slides already decide
         if d.doc_type == "facilitator_guide" and d.ext == "pptx":
             for code, fn in slides.DOC_CHECKS.items():
                 f = fn(ctx, d, info)

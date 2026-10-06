@@ -279,6 +279,54 @@ def _count_check(code, qs, lo, hi, key=None, chapter=None, doc=None):
                   evidence=["The question count is within range; the level split is not checked by code."])
 
 
+HIGHER = ["higher", "analy", "evaluat", "creat", "critical", "تجزیہ", "تجزی", "تنقیدی", "تخلیقی", "جائزہ", "فیصلہ", "اعلیٰ"]
+LOWER = ["lower", "remember", "understand", "apply", "fidelity", "recall", "یاد", "فہم", "سمجھ", "اطلاق", "کتابی", "معروضی"]
+
+
+def question_level(q):
+    """'higher' / 'lower' / None from the level written with the question (its heading line, or the
+    template's Order Level column)."""
+    head = normalize(q.text.split("\n")[0] + " " + " ".join(re.findall(r"(?:order level|آرڈر لیول)[^\n]*", q.block, re.I))).lower()
+    hi = any(normalize(w).lower() in head for w in HIGHER)
+    lo = any(normalize(w).lower() in head for w in LOWER)
+    return "higher" if hi and not lo else "lower" if lo and not hi else None
+
+
+def _split_check(f, qs, want_higher, label):
+    """Turn a count Pass into Fail when the questions' own level labels show the split is far off."""
+    if f.status != PASS or not qs:
+        return f
+    levels = [question_level(q) for q in qs]
+    known = [l for l in levels if l]
+    if len(known) < max(2, len(qs) / 2):
+        f.evidence.append(f"The {label} split was not checked: fewer than half the questions state their level")
+        return f
+    share = sum(1 for l in known if l == "higher") / len(known)
+    if abs(share - want_higher) > 0.2:
+        f.status, f.partial = FAIL, False
+        f.message = (f"{len(qs)} questions, but {round(share * 100)}% of those that state a level are higher-order "
+                     f"(expected about {round(want_higher * 100)}%, split {label})")
+        f.marks = [mark(q.text, "higher-order question") for q, l in zip(qs, levels) if l == "higher"] if share > want_higher else \
+                  [mark(q.text, "lower-order question") for q, l in zip(qs, levels) if l == "lower"]
+    else:
+        f.evidence.append(f"{round(share * 100)}% of questions that state a level are higher-order (split {label})")
+    return f
+
+
+def _answer_key(ctx, info, qs):
+    """CE5: an answer key is optional for the per-lesson Assessment; present -> Pass, absent -> N/A."""
+    labels = ctx.profile["vocab"]["answer_key_labels"] + ctx.profile["vocab"].get("answer_line_labels", [])
+    with_answer = [q.num for q in qs if _label_present(q.block, [l for l in labels if len(l) > 3])]
+    key_section = any(len(p.text.strip()) <= 40 and _label_present(p.text, ctx.profile["vocab"]["answer_key_labels"])
+                      for p in info.body_paras())
+    if key_section:
+        return result("CE5", PASS, "An answer key is included", partial=True, evidence=["Completeness needs a reviewer."])
+    if with_answer:
+        return result("CE5", PASS, f"Answers are given under {len(with_answer)} of {len(qs)} questions", partial=True,
+                      evidence=["The guideline recommends a key at the end of the document rather than under each question."])
+    return result("CE5", NA, "The assessment includes no answer key")
+
+
 def _tag_check(ctx, code, qs, info, key=None, chapter=None, doc=None):
     whole = "\n".join(p.text for p in info.paras)
     if not _slo_tag_present(ctx, whole):
@@ -315,10 +363,13 @@ def exam_checks(ctx, doc, info, doc_type):
     qs, summary, why_not = get_questions(ctx, doc, info)
     out = []
     if doc_type == "chapter_exam":
-        out.append(_count_check("CE1", qs, 6, 8, key=doc.key, doc=doc.rel))
+        out.append(_split_check(_count_check("CE1", qs, 6, 8, key=doc.key, doc=doc.rel), qs, 0.3, "70/30"))
         out.append(_tag_check(ctx, "CE4", qs, info, key=doc.key, doc=doc.rel))
+        f = _answer_key(ctx, info, qs)
+        f.lesson, f.doc = doc.key, doc.rel
+        out.append(f)
     else:
-        out.append(_count_check("WS1", qs, 8, 10, chapter=doc.chapter, doc=doc.rel))
+        out.append(_split_check(_count_check("WS1", qs, 8, 10, chapter=doc.chapter, doc=doc.rel), qs, 0.6, "40/60"))
         mix = Counter(q.qtype for q in qs)
         out.append(result("WS2", REVIEW, "Question formats found: " + ", ".join(f"{k} {v}" for k, v in mix.most_common()) +
                           " (the workbook asks for a mix drawn from six formats; the reviewer judges the mix)",

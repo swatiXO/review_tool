@@ -42,6 +42,26 @@ Open the `Review Summary` sheet, or read `course_review/checks/registry.py`. Eac
 * **No**: left to a person (logo placement, FG4's undefined "five items", FG5 video cues, WE19
   screenshots, WE24, ...).
 
+## Beyond the checklist: each output's own guidelines
+
+The team reviews every output against the checklist, that output's guideline document and template, and the
+Writing & Editing Guidelines. `checks/guidelines.py` adds the guideline rules code can check. They appear in the
+marked-up documents and the report (not in the workbook, which only has checklist codes):
+
+| Code | Output | Rule (source) |
+|---|---|---|
+| LPG1-LPG4 | Lesson Plan | Warm-up 1-3 questions; Key Takeaways in bullets; Book and SLO Coverage table; Glossary Terms (Lesson Plan Guidelines, template) |
+| FGG1-FGG3 | Facilitator's Guide | Notes in the speaker-notes pane; a time per slide adding up to the planned duration; duration on the Cover |
+| FG1, FG4 | Facilitator's Guide | Decided by code where the slides make it clear: SLOs pasted from the Lesson Plan; Concept Building slides without notes |
+| ASG1 | Pop Quiz, Assessment, Chapter Exam, Data Bank | No "all / none of the above" |
+| SB1-SB5 | Storyboard | Template columns; 2:00 cap; narration about 260-300 words; "New" / "Edited from"; short on-screen text |
+| WEG1-WEG2 | Word documents | 8 pt after each paragraph; bullets (not numbering) for lists inside a section |
+
+Decisions taken where the documents disagree (see `house_rules` in the profile): Urdu font is Noto Nastaliq; font
+sizes follow the Writing & Editing Guidelines' table for the package's grade; the per-lesson Assessment is 6-8
+questions at 70/30 and the per-chapter Chapter Exam 8-10 at 40/60. The workbook's sheet names are swapped against
+the team's names for those two, so comments in the marked-up documents say "CE1 (Assessment)" and "WS1 (Chapter Exam)".
+
 ## How files are matched to checklist sheets
 
 By **scope**, as the workbook defines it, not by file name: per-lesson `Assessment` files feed the

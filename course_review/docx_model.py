@@ -87,6 +87,7 @@ class ParaInfo:
     all_bold: bool
     in_toc: bool = False
     hanging: int = 0          # hanging indent in twips (0 = none)
+    space_after: Optional[float] = None   # points after the paragraph (None = not set anywhere)
 
 
 @dataclass
@@ -455,6 +456,13 @@ def parse_docx(path) -> DocxInfo:
                 return ("points", line / 20.0)
         return ("default", 1.0)
 
+    def space_after(p_el):
+        for ppr in res.ppr_chain(p_el):
+            sp = ppr.find(qn("w:spacing"))
+            if sp is not None and sp.get(qn("w:after")) is not None:
+                return int(sp.get(qn("w:after"))) / 20.0
+        return None
+
     def hanging_indent(p_el):
         for ppr in res.ppr_chain(p_el):
             ind = ppr.find(qn("w:ind"))
@@ -507,7 +515,7 @@ def parse_docx(path) -> DocxInfo:
         return ParaInfo(
             idx=len(info.paras), text=text, style=sname, heading_level=hl,
             is_title=(low == "title"), bidi=bidi, runs=runs, in_table=in_table, table_idx=table_idx,
-            row_idx=row_idx, num_label=num_label, list_kind=list_kind, line_spacing=line_spacing(p_el),
+            row_idx=row_idx, num_label=num_label, list_kind=list_kind, line_spacing=line_spacing(p_el), space_after=space_after(p_el),
             images=_para_images(doc, p_el), shading=shd, all_bold=all_bold,
             in_toc=low.startswith("toc") or low == "table of contents", hanging=hanging_indent(p_el))
 

@@ -77,10 +77,21 @@ def _locate(m, para_loose, used, allowed=None):
     return [pick]
 
 
+# The workbook's sheet names are swapped against the team's names for these outputs: its "Chapter
+# Exam" sheet (CE) is the per-lesson Assessment, its "Worksheet" sheet (WS) is the per-chapter
+# Chapter Exam. Comments use the team's names so a reviewer is not confused.
+OUTPUT_NAME = {"CE": "Assessment", "WS": "Chapter Exam"}
+
+
+def _code(code):
+    name = OUTPUT_NAME.get(re.sub(r"\d+$", "", code))
+    return f"{code} ({name})" if name else code
+
+
 def _line(f, note=""):
     if not f.code:                        # a _Note already holds a finished line
         return f.message
-    return f"{f.code} {LABEL.get(f.status, f.status.upper())}: {note or f.message}"
+    return f"{_code(f.code)} {LABEL.get(f.status, f.status.upper())}: {note or f.message}"
 
 
 def _worst(statuses):
@@ -288,8 +299,8 @@ def _notes_text(findings, pkg, rules):
         if f.status not in (FAIL, REVIEW):
             continue
         codes, places = groups[(f.status, f.message)]
-        if f.code and f.code not in codes:
-            codes.append(f.code)
+        if f.code and _code(f.code) not in codes:
+            codes.append(_code(f.code))
         where = f.lesson.short() if getattr(f, "lesson", None) else (f"Ch{f.chapter}" if getattr(f, "chapter", None) else "")
         if where and where not in places:
             places.append(where)

@@ -61,45 +61,66 @@ def test_we6_is_na_without_english(tmp_path):
 
 
 def test_we7_reads_complex_script_font(tmp_path):
-    d = new_doc()
-    add(d, URDU, urdu_font=JAMIL, rtl=True)
-    assert run("WE7", d, tmp_path).status == PASS
+    # team decision 2026-10-06: Urdu is set in Noto Nastaliq (the guideline's size table)
     d = new_doc()
     add(d, URDU, urdu_font="Noto Nastaliq Urdu", rtl=True)
+    assert run("WE7", d, tmp_path).status == PASS
+    d = new_doc()
+    add(d, URDU, urdu_font=JAMIL, rtl=True)
     r = run("WE7", d, tmp_path)
-    assert r.status == FAIL and "Noto" in r.message
+    assert r.status == FAIL and "Jamil" in r.message
 
 
-# WE8 ----------------------------------------------------------------------
-def test_we8_body_must_be_14(tmp_path):
-    d = new_doc()
-    add(d, "Body text here", size=14)
-    assert run("WE8", d, tmp_path).status in (PASS,)
-    d = new_doc()
-    add(d, "Body text here", size=11)
+# WE8: sizes by grade from the Writing & Editing Guidelines (Grade 6+: title 20, heading 14, body 12)
+def titled(size=12, **kw):
+    d = new_doc(size=size)
+    add(d, "Document title", size=20, bold=True)
+    return d
+
+
+def test_we8_body_size_follows_the_grade(tmp_path):
+    d = titled()
+    add(d, "Body text here, a normal sentence.", size=12)
     r = run("WE8", d, tmp_path)
-    assert r.status == FAIL and "Body" in r.message
+    assert r.status == PASS and "Grade 6" in " ".join(r.evidence)
+    d = titled()
+    add(d, "Body text here, a normal sentence.", size=11)
+    r = run("WE8", d, tmp_path)
+    assert r.status == FAIL and "Body (12)" in r.message
+
+
+def test_we8_grade_1_to_5_uses_the_larger_sizes(tmp_path):
+    from course_review.checks.formatting import grade_sizes
+    ctx = make_ctx()
+    ctx.pkg.subject = "Grade-4-Science"
+    assert grade_sizes(ctx)[1]["body"] == 14 and grade_sizes(ctx)[1]["section_heading"] == 16
 
 
 def test_we8_uses_complex_script_size_for_urdu(tmp_path):
-    d = new_doc()
-    add(d, URDU, size=14, urdu_font=JAMIL, rtl=True)  # sz and szCs both 14
+    d = titled()
+    add(d, URDU, size=12, urdu_font=JAMIL, rtl=True)  # sz and szCs both 12
     assert run("WE8", d, tmp_path).status == PASS
-    d = new_doc()
-    p = add(d, URDU, size=14, urdu_font=JAMIL, rtl=True)
+    d = titled()
+    p = add(d, URDU, size=12, urdu_font=JAMIL, rtl=True)
     for el in p._p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}szCs"):
         el.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "22")  # Word shows 11pt
     assert run("WE8", d, tmp_path).status == FAIL
 
 
-def test_we8_heading1_16_bold(tmp_path):
-    d = new_doc()
+def test_we8_section_heading_14_bold_including_bold_lines_used_as_headings(tmp_path):
+    d = titled()
     h = d.add_heading("Title of section", level=1)
     for r in h.runs:
-        r.font.size = __import__("docx").shared.Pt(16)
+        r.font.size = __import__("docx").shared.Pt(14)
         r.font.bold = True
         r.font.color.rgb = None
+    add(d, "Body text here, a normal sentence.", size=12)
     assert run("WE8", d, tmp_path).status == PASS
+    d = titled()
+    add(d, "A bold line used as a heading", size=11, bold=True)
+    add(d, "Body text here, a normal sentence.", size=12)
+    r = run("WE8", d, tmp_path)
+    assert r.status == FAIL and "Section heading (14 bold)" in r.message
 
 
 # WE10 / WE11 --------------------------------------------------------------

@@ -87,6 +87,31 @@ vocab:
   # Workbook says "lower-order only" without defining it. Bloom's lower-order levels:
   lower_order_levels: ["یاد کرنا", "سمجھنا", "اطلاق", "Remember", "Understand", "Apply"]
 
+# Team decisions where the Writing & Editing Guidelines and the checklist workbook disagree.
+house_rules:
+  # The guideline's size table names Noto Nastaliq; the team confirmed it (2026-10-06).
+  urdu_fonts: ["Noto Nastaliq Urdu", "Noto Nastaliq"]
+  english_fonts: ["Poppins", "Montserrat"]
+  # Sizes follow the Writing & Editing Guidelines' table, which depends on the grade.
+  # Grade comes from the package (folder) name, e.g. Grade-6-Islamiat.
+  sizes_by_grade:
+    - grades: [1, 5]
+      title: 20
+      section_heading: 16
+      body: 14
+      table_body: 14
+      table_header: 16
+      caption: 11
+    - grades: [6, 12]
+      title: 20
+      section_heading: 14
+      body: 12
+      table_body: 12
+      table_header: 14
+      caption: 11
+  default_grade: 6
+  paragraph_space_after_pt: 8     # "8 pt after each paragraph"
+
 # Thresholds the workbook does not state.
 thresholds:
   text_size_tolerance: 0.02       # share of text allowed to deviate from a font size rule

@@ -116,7 +116,7 @@ def we6(ctx, doc, info):
             fonts[r.font or "(unresolved)"] += len(r.text)
     if not fonts:
         return result("WE6", NA, "No English text in this document")
-    allowed = {"poppins", "montserrat"}
+    allowed = {canon_font(f) for f in ctx.profile.get("house_rules", {}).get("english_fonts", ["Poppins", "Montserrat"])}
     families = {canon_font(f) for f in fonts}
     bad = {f: n for f, n in fonts.items() if canon_font(f) not in allowed}
     if bad or len(families) > 1:
@@ -133,12 +133,14 @@ def we7(ctx, doc, info):
             fonts[r.font or "(unresolved)"] += len(r.text)
     if not fonts:
         return result("WE7", NA, "No Urdu text in this document")
-    bad = {f: n for f, n in fonts.items() if canon_font(f) != "jamilnoorinastaliq"}
+    names = ctx.profile.get("house_rules", {}).get("urdu_fonts", ["Jamil Noori Nastaliq"])
+    allowed = {canon_font(f) for f in names}
+    bad = {f: n for f, n in fonts.items() if canon_font(f) not in allowed}
     if bad:
         total = sum(fonts.values())
-        return result("WE7", FAIL, f"Urdu text is not Jamil Noori Nastaliq: " + top(fonts, 3, lambda k, v: f"{k} ({pct(v, total)})"),
+        return result("WE7", FAIL, f"Urdu text is not {names[0]}: " + top(fonts, 3, lambda k, v: f"{k} ({pct(v, total)})"),
                       ["Urdu fonts used: " + top(fonts, 5, lambda k, v: f"{k} ({v} chars)")])
-    return result("WE7", PASS, "All Urdu text is Jamil Noori Nastaliq")
+    return result("WE7", PASS, f"All Urdu text is {names[0]}")
 
 
 _CAPTION_STYLE = re.compile(r"caption", re.I)
@@ -149,12 +151,29 @@ def _caption_re(ctx, kind):
     return re.compile(rf"^\s*(?:{prefixes})\s*(\d+)\s*[:：.\-–]", re.I)
 
 
+def grade_sizes(ctx):
+    """(grade, sizes) from the Writing & Editing Guidelines' table for this package's grade."""
+    hr = ctx.profile.get("house_rules", {})
+    m = re.search(r"grade[-_ ]*(\d+)", getattr(ctx.pkg, "subject", "") or "", re.I)
+    grade = int(m.group(1)) if m else hr.get("default_grade", 6)
+    for band in hr.get("sizes_by_grade", []):
+        lo, hi = band["grades"]
+        if lo <= grade <= hi:
+            return grade, band, bool(m)
+    return grade, {"title": 20, "section_heading": 16, "body": 14, "table_body": 14, "table_header": 14, "caption": 11}, bool(m)
+
+
 def we8(ctx, doc, info: DocxInfo):
     tol = ctx.th["text_size_tolerance"]
     tcap, fcap = _caption_re(ctx, "table"), _caption_re(ctx, "figure")
-    cats = {"Title (20 bold)": (20, True, None), "Section heading, Heading 1 (16 bold)": (16, True, None),
-            "Body (14)": (14, None, None), "Table text (14)": (14, None, None), "Table header row (bold)": (None, True, None),
-            "Caption (11 italic)": (11, None, True), "TOC (Arial)": (None, None, None)}
+    grade, sz, known = grade_sizes(ctx)
+    T, H, B, TB, TH, C = (f"Title ({sz['title']} bold)", f"Section heading ({sz['section_heading']} bold)", f"Body ({sz['body']})",
+                          f"Table text ({sz['table_body']})", f"Table header row ({sz['table_header']} bold)", f"Caption ({sz['caption']} italic)")
+    cats = {T: (sz["title"], True, None), H: (sz["section_heading"], True, None), B: (sz["body"], None, None),
+            TB: (sz["table_body"], None, None), TH: (sz["table_header"], True, None), C: (sz["caption"], None, True),
+            "TOC (Arial)": (None, None, None)}
+    heads = {id(p) for p in doc_headings(ctx, info)}
+    first = next((p for p in info.paras if p.text.strip() and not p.in_table), None)
     stats = {k: Counter() for k in cats}
     wrong = {k: 0 for k in cats}
     totals = {k: 0 for k in cats}
@@ -163,20 +182,22 @@ def we8(ctx, doc, info: DocxInfo):
             continue
         norm = normalize(p.text)
         is_caption = bool(_CAPTION_STYLE.search(p.style)) or bool(tcap.match(norm) or fcap.match(norm))
-        if p.is_title:
-            cat = "Title (20 bold)"
-        elif p.heading_level == 1:
-            cat = "Section heading, Heading 1 (16 bold)"
+        if p.is_title or (p is first and not p.heading_level):
+            cat = T
+        elif p.heading_level == 1 or (id(p) in heads and not p.heading_level):
+            cat = H
         elif p.heading_level:
-            continue  # lower heading levels are not specified by the workbook
+            continue  # lower heading levels are not specified in the size table
         elif p.in_toc:
             cat = "TOC (Arial)"
         elif is_caption:
-            cat = "Caption (11 italic)"
+            cat = C
+        elif p.in_table and p.row_idx == 0:
+            cat = TH
         elif p.in_table:
-            cat = "Table text (14)"
+            cat = TB
         else:
-            cat = "Body (14)"
+            cat = B
         want_size, want_bold, want_italic = cats[cat]
         for r in p.runs:
             if not r.script:
@@ -197,13 +218,6 @@ def we8(ctx, doc, info: DocxInfo):
                 bad = True
                 stats[cat][r.font or "unset"] += n
             wrong[cat] += n if bad else 0
-        if p.in_table and p.row_idx == 0 and not p.is_title:
-            for r in p.runs:
-                if r.script:
-                    totals["Table header row (bold)"] += len(r.text)
-                    if not r.bold:
-                        wrong["Table header row (bold)"] += len(r.text)
-                        stats["Table header row (bold)"]["not bold"] += len(r.text)
     ev, checked = [], 0
     for cat in cats:
         if not totals[cat]:
@@ -213,10 +227,10 @@ def we8(ctx, doc, info: DocxInfo):
             ev.append(f"{cat}: {pct(wrong[cat], totals[cat])} of text is wrong ({top(stats[cat], 4)})")
     if not checked:
         return result("WE8", NA, "No text to check")
+    basis = f"Sizes for Grade {grade} from the Writing & Editing Guidelines" + ("" if known else " (grade not found in the package name; assumed)")
     if ev:
-        return result("WE8", FAIL, "; ".join(ev[:3]), ev)
-    return result("WE8", PASS, "Sizes and weights match the table", partial=not totals["Title (20 bold)"],
-                  evidence=["No Title-style paragraph, so the title size was not checked."] if not totals["Title (20 bold)"] else [])
+        return result("WE8", FAIL, "; ".join(ev[:3]), ev + [basis])
+    return result("WE8", PASS, "Sizes and weights match the table", evidence=[basis])
 
 
 # ----------------------------------------------------------------- bilingual
@@ -534,7 +548,16 @@ def we20(ctx, doc, info):
 
 def we25(ctx, doc, info):
     if not isinstance(info, DocxInfo):
-        return result("WE25", REVIEW, "Slide footers are not checked yet")
+        kinds = {k for _, k, _ in info.footers}
+        if not info.footers:
+            return result("WE25", FAIL, "No slide shows a footer (no footer, slide-number or date placeholder on any slide)")
+        missing = [n for k, n in (("sldNum", "page (slide) number"), ("dt", "date"), ("ftr", "document name and version")) if k not in kinds]
+        texts = " ".join(t for _, k, t in info.footers if k == "ftr")
+        if "ftr" in kinds and not re.search(r"v\s?\d+(?:\.\d+)*", texts, re.I):
+            missing.append("version in the footer text")
+        if missing:
+            return result("WE25", FAIL, "Slide footer is missing: " + ", ".join(missing))
+        return result("WE25", PASS, "Slides carry a footer with number, date, name and version", partial=True)
     ev = []
     ft = info.footer_text.strip()
     if not ft and not info.footer_fields:

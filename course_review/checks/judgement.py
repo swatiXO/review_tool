@@ -19,7 +19,7 @@ from ..models import FAIL, PASS, REVIEW
 from ..slo import slos_for
 from ..textutil import normalize, starts_with_label
 from .assessments import align_pop_quiz, get_questions
-from .common import result
+from .common import mark, result
 from .lessonplan import find_sections
 
 
@@ -119,14 +119,81 @@ def lp6(ctx, key, doc, secs, slos):
     return suggestion("LP6", j, **where(key, doc))
 
 
+def cb_subtopics(ctx, info):
+    """[(heading, text)] for the Concept Building sub-topics, split at its headings."""
+    from .formatting import doc_headings
+    from .guidelines import lp_ranges
+    r = lp_ranges(ctx, info).get("concept_building")
+    if not r:
+        return []
+    heads = [p.idx for p in doc_headings(ctx, info) if r[0] < p.idx < r[1]]
+    out = []
+    for i, h in enumerate(heads):
+        stop = heads[i + 1] if i + 1 < len(heads) else r[1]
+        body = "\n".join(p.text.strip() for p in info.paras[h + 1:stop] if p.text.strip())
+        out.append((info.paras[h].text.strip(), body))
+    return out
+
+
 def lp7(ctx, key, doc, secs, slos):
     if "introduction" not in secs or "concept_building" not in secs or "key_takeaways" not in secs:
         return None
-    mats = [Material("Introduction (the story or scenario)", secs["introduction"]),
-            Material("Concept Building", secs["concept_building"]), Material("Key Takeaways", secs["key_takeaways"])]
-    j = judge(ctx.model, "LP7", ctx.rules["LP7"].text if "LP7" in ctx.rules else "Story runs through every sub-topic and is resolved in Key Takeaways", mats,
-              "Does the story or scenario from the Introduction come back in every Concept Building sub-topic, and is it resolved in Key Takeaways?")
-    return suggestion("LP7", j, **where(key, doc))
+    rule = ctx.rules["LP7"].text if "LP7" in ctx.rules else "Story runs through every sub-topic and is resolved in Key Takeaways"
+    info = ctx.docx(doc)
+    subs = cb_subtopics(ctx, info) if info is not None else []
+    if len(subs) < 2:
+        mats = [Material("Introduction (the story or scenario)", secs["introduction"]),
+                Material("Concept Building", secs["concept_building"]), Material("Key Takeaways", secs["key_takeaways"])]
+        j = judge(ctx.model, "LP7", rule, mats,
+                  "Does the story or scenario from the Introduction come back in every Concept Building sub-topic, and is it resolved in Key Takeaways?")
+        return suggestion("LP7", j, **where(key, doc))
+    # Small models answer "does the story run through every sub-topic" badly (they say yes). They can
+    # name a story's characters, which is checked against the Introduction, and code then looks for
+    # those names in each sub-topic.
+    names = story_names(ctx, key, secs["introduction"])
+    if not names:
+        mats = [Material("Introduction (the story or scenario)", secs["introduction"]),
+                Material("Concept Building", secs["concept_building"]), Material("Key Takeaways", secs["key_takeaways"])]
+        j = judge(ctx.model, "LP7", rule, mats,
+                  "Does the story or scenario from the Introduction come back in every Concept Building sub-topic, and is it resolved in Key Takeaways?")
+        return suggestion("LP7", j, **where(key, doc))
+    from ..judge import Judgement, _loose
+    def named(text):                      # whole words only: a short name must not match inside another word
+        t = f" {_loose(text)} "
+        return any(f" {_loose(nm)} " in t for nm in names)
+    has = [i for i, (h, body) in enumerate(subs, 1) if named(h + " " + body)]
+    missing = [i for i in range(1, len(subs) + 1) if i not in has]
+    resolved = named(secs["key_takeaways"] + " " + subs[-1][1])
+    parts = [f"the story's characters ({', '.join(names)}) appear in {len(has)} of {len(subs)} Concept Building sub-topics"]
+    if missing:
+        parts.append("missing from: " + "; ".join(f"{i}. {subs[i - 1][0][:40]}" for i in missing))
+    parts.append("resolved at the end" if resolved else "not resolved at the end")
+    j = Judgement(verdict="pass" if not missing and resolved else "fail", reason="; ".join(parts) + ".",
+                  quotes=[subs[i - 1][0] for i in has][:3] or names, usable=True)
+    f = suggestion("LP7", j, **where(key, doc))
+    f.evidence.append("Character names were taken from the Introduction by the model and checked against it; "
+                      "the sub-topics were searched by code. A story told without its characters' names would be missed.")
+    f.marks += [mark(subs[i - 1][0], "this sub-topic does not bring back the lesson's story") for i in missing]
+    return f
+
+
+STORY_SYSTEM = """You read the Introduction of a school lesson plan (Urdu or English). It tells a short story or scenario.
+List the names of the story's characters (people or named animals) exactly as written in the text. Do not list
+prophets, companions or other historical or religious figures that the lesson teaches about; only the story's own
+characters. Answer with JSON only: {"names": ["...", "..."]}. If there is no story with named characters, {"names": []}."""
+
+
+def story_names(ctx, key, intro):
+    from ..judge import _loose
+    try:
+        reply = cached_chat(ctx.model, f"story-names-{key.short()}", STORY_SYSTEM, intro[:4000])
+    except LLMError:
+        return []
+    names = reply.get("names") if isinstance(reply, dict) else None
+    if not isinstance(names, list):
+        return []
+    li = _loose(intro)
+    return [n.strip() for n in names if isinstance(n, str) and len(n.strip()) >= 2 and _loose(n) and _loose(n) in li][:6]
 
 
 def lp8(ctx, key, doc, secs, slos):
@@ -240,7 +307,7 @@ def judgement_findings(ctx):
         g = guide_doc(ctx, key)
         if g is not None:
             for code, fn in GUIDE_JUDGES.items():
-                if m.wants(code):
+                if m.wants(code) and (code, key) not in ctx.decided:
                     f = fn(ctx, key, g, slos)
                     if f:
                         out.append(f)
