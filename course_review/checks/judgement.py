@@ -255,7 +255,10 @@ def lp7(ctx, key, doc, secs, slos):
     f = suggestion("LP7", j, **where(key, doc))
     f.evidence.append("Character names were taken from the Introduction by the model and checked against it; "
                       "the sub-topics were searched by code. A story told without its characters' names would be missed.")
-    f.marks += [mark(subs[i - 1][0], "this sub-topic does not bring back the lesson's story") for i in missing]
+    if missing:
+        # point at the sub-topics that lack the story, not at the ones that have it
+        f.marks = [mark(subs[i - 1][0], f"model suggests FAIL: this sub-topic does not bring back the lesson's story "
+                                         f"({', '.join(names)}); {j.reason}", exact=True) for i in missing]
     return f
 
 

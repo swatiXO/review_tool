@@ -118,3 +118,23 @@ def test_review_writes_a_marked_up_zip_with_notes(tmp_path):
     (tmp_path / "lp.docx").write_bytes(z.read(lp))
     top = comment_texts(tmp_path / "lp.docx")[-1]
     assert "Fixed by the tool" in top and "A4" in top
+
+
+def test_every_turquoise_highlight_has_a_comment_that_says_what_to_do(tmp_path):
+    d = new_doc()
+    for t in ("Intro text about roots.", "Roots hold the plant.", "Roots take in water.", "Stems carry water.", "Leaves make food."):
+        add(d, t)
+    src, dst = save(d, tmp_path), tmp_path / "out.docx"
+    suggested_pass = result("LP9", REVIEW, "[model-assisted] Would be pass: fine", method="model",
+                            marks=[mark("Roots hold the plant.\nRoots take in water.", "model suggests PASS: fine", exact=False)])
+    suggested_fail = result("LP7", REVIEW, "[model-assisted] Would be fail: story missing", method="model",
+                            marks=[mark("Stems carry water.", "model suggests FAIL: no story here"),
+                                   mark("Leaves make food.", "model suggests FAIL: no story here")])
+    annotate.annotate_docx(src, dst, [suggested_pass, suggested_fail])
+    c = colours(dst)
+    turquoise = [t for t, cs in c.items() if WD_COLOR_INDEX.TURQUOISE in cs]
+    assert turquoise == ["Roots hold the plant.", "Stems carry water.", "Leaves make food."]   # a pass: one place only
+    texts = comment_texts(dst)
+    assert any("model suggests PASS" in t and "delete this comment" in t for t in texts)
+    assert any("model suggests FAIL" in t and "reword this as a suggestion" in t for t in texts)
+    assert sum(1 for t in texts if t.startswith("LP7")) == 2                                    # each FAIL place commented
