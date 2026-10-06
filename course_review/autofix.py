@@ -6,8 +6,8 @@ numbering, table captions, bullets instead of numbered lists, no colour, a foote
 of Contents for long Lesson Plans, the yellow highlight on correct answers, and the file
 name. What needs a person (content, SLOs, the story, feedback quality) is left to comments.
 
-Each fixer returns short lines for the "Fixed by the tool" comment, and the checklist codes
-it settled, so the annotator does not also comment on them.
+Each fixer returns short lines for the "Fixed by the tool" comment. A Fail is left out of the
+comments only when the same check, run again on the fixed copy, passes (see remaining).
 """
 import re
 from datetime import date
@@ -22,35 +22,77 @@ from docx.shared import Inches, Mm, Pt
 from lxml import etree
 
 from .checks.formatting import own_number
+from .models import FAIL, NA, PASS, REVIEW
 from .textutil import EASTERN_DIGITS, VERSE_MARK, is_arabic_scripture, normalize, script_counts, to_western_digits
 
-# Codes a fix settles: the annotator does not comment on them on a fixed document.
-DOCX_FIXED = {"WE4", "WE6", "WE7", "WE8", "WE10", "WE11", "WE12", "WE13", "LP4", "WE16", "WE23", "WE25", "WEG1", "WEG2",
-              "LP5", "WE1", "WE2", "WE3", "LP10"}
-PPTX_FIXED = {"WE6", "WE7", "WE10", "WE23", "WE1", "WE2", "WE3", "WE25"}
+# Codes the fixer works on. A Fail on one of them is re-checked on the fixed copy (see remaining).
+DOCX_FIXED = {"WE4", "WE6", "WE7", "WE8", "WE10", "WE11", "WE12", "WE13", "LP4", "WE15", "WE16", "WE23", "WE25", "WEG1",
+              "WEG2", "LPG2", "LP5", "WE1", "WE2", "WE3"}
+PPTX_FIXED = {"WE5", "WE6", "WE7", "WE10", "WE23", "WE1", "WE2", "WE3", "WE25"}
 
 
-def settled(f, ext, doc_type, extra):
-    """True when the fixed document no longer has the problem this finding reports."""
-    if ext == "docx":
-        if f.code in ("WE12", "LP4") and not extra.get("numbered", True):
-            return False                  # headings were styled but not numbered: a person decides the numbering
-        if f.code in DOCX_FIXED:
-            return True
-        if f.code == "WE15":
-            return extra.get("toc", False)
-        if f.code == "LPG2":
-            return "numbered" in f.message
-        if f.code in ("PQ4", "DB4"):
-            return extra.get("ticked", 0) > 0 and "check-mark" in f.message
-    if ext == "pptx":
-        if f.code in PPTX_FIXED:
-            return True
-        if f.code == "WE5":
-            return "line spacing" in f.message and "16:9" not in f.message
-        if f.code == "FG8":
-            return "WE5" in f.message and "16:9" not in f.message and "WE25" not in f.message
-    return False
+def recheck(ctx, doc, path, rel):
+    """The per-document checks run again on the fixed copy at `path`, as if it were named `rel`.
+    Returns code -> Finding, or {} when the copy cannot be read (then nothing counts as fixed)."""
+    from dataclasses import replace
+    from .checks import formatting, guidelines, lessonplan
+    from .docx_model import parse_docx
+    from .pptx_model import parse_pptx
+    try:
+        info = (parse_docx if doc.ext == "docx" else parse_pptx)(path)
+    except Exception:
+        return {}
+    proxy = replace(doc, rel=rel, abs=str(path))
+    had, old = rel in ctx._cache, ctx._cache.get(rel)
+    ctx._cache[rel] = info                       # a check that loads this document sees the fixed copy
+    try:
+        table = formatting.DOCX_CHECKS if doc.ext == "docx" else formatting.PPTX_CHECKS
+        out = [fn(ctx, proxy, info) for fn in table.values()]
+        out += guidelines.doc_checks(ctx, proxy, info)
+        if doc.ext == "docx" and doc.doc_type == "lesson_plan":
+            out += [fn(ctx, proxy, info) for fn in lessonplan.DOC_CHECKS.values()]
+    except Exception:
+        return {}
+    finally:
+        if had:
+            ctx._cache[rel] = old
+        else:
+            ctx._cache.pop(rel, None)
+    return {f.code: f for f in out}
+
+
+def remaining(findings, ext, after, extra):
+    """The findings to write into the fixed copy.
+
+    A Fail or needs-reviewer result on a rule the fixer works on is replaced by what the same
+    check says about the fixed copy: left out if the copy passes (or the rule no longer applies),
+    otherwise the copy's own result, so the comment describes the file the reader opens. LP10 and
+    FG8 are worked out again from the copy's results with the engine's own rule. Everything else
+    (passes, rules the fixer does not touch, a copy that could not be re-checked) is kept as it was.
+    """
+    from .engine import DERIVED, derived_finding
+    handled = DOCX_FIXED if ext == "docx" else PPTX_FIXED
+    out = []
+    for f in findings:
+        g = None
+        if f.status not in (FAIL, REVIEW) or not after:
+            g = f
+        elif ext == "docx" and f.code in ("PQ4", "DB4"):     # checked across the package, so not re-run here
+            if not (f.status == FAIL and extra.get("ticked", 0) > 0 and "check-mark" in f.message):
+                g = f
+        elif f.code in DERIVED:
+            g = derived_finding(f.code, [after[c] for c in DERIVED[f.code] if c in after]) or f
+        elif f.code in handled and f.code in after:
+            g = after[f.code]
+        else:
+            g = f
+        if g is None or (g is not f and g.status in (PASS, NA)):
+            continue
+        if g is not f:
+            g.doc, g.lesson = f.doc, f.lesson
+        out.append(g)
+    return out
+
 
 TYPE_NAMES = {"lesson_plan": "Lesson-Plan", "chapter_exam": "Assessment", "facilitator_guide": "Facilitator-Guide",
               "video_storyboard": "Storyboard", "worksheet": "Chapter-Exam", "pop_quiz": "Pop-Quiz", "data_bank": "Data-Bank",
@@ -58,11 +100,49 @@ TYPE_NAMES = {"lesson_plan": "Lesson-Plan", "chapter_exam": "Assessment", "facil
 TICKS = re.compile(r"^\s*[✅✔☑✓]️?\s*")
 
 
-def new_name(doc, grade_subject):
-    """File name in the guideline pattern [Type]-[Identifier]-[Chapter/Topic]-v[Version], keeping any version."""
+# A version is 'v' straight before the number (v2, v1.0; not 'Class V 2') or the word Version / ورژن before it.
+# The major number has at most two digits, so a year (2024) is never read as a version.
+_VNUM = r"(\d{1,2}(?:\.\d{1,3}){0,3})(?![\d.]*\d)"
+VERSION_MARKED = re.compile(r"(?:(?<![A-Za-z])v|\bversion\s*[:#]?\s*|\bver\.\s*|ورژن\s*[:#]?\s*)" + _VNUM, re.I)
+VERSION_IN_TEXT = re.compile(r"(?:\bversion|ورژن)\s*[:#]?\s*" + _VNUM, re.I)
+
+
+def _last(rx, text):
+    found = rx.findall(to_western_digits(text or ""))
+    return found[-1] if found else None
+
+
+def find_version(doc, info):
+    """The document's own version and where it was found, or (None, None).
+
+    Looked for anywhere in the file name (Lesson-Plan-v2-Final, LessonPlan v1.0 (1)), then the
+    footer, then the file's properties, then an explicit 'Version 1.2' line near the top. A
+    version is never made up: one the tool cannot find is left for the writer to add (WE3 stays
+    a Fail with its comment)."""
     stem = doc.rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    m = re.search(r"-?v(\d+(?:\.\d+)*)\s*$", stem.replace(" ", ""), re.I)
-    version = m.group(1) if m else "0.1"
+    v = _last(VERSION_MARKED, stem)
+    if v:
+        return v, "the file name"
+    if info is None:
+        return None, None
+    footer = info.footer_text if doc.ext == "docx" else " ".join(t for _, _, t in info.footers)
+    v = _last(VERSION_MARKED, footer)
+    if v:
+        return v, "the footer"
+    m = re.fullmatch(r"\s*v?\s*" + _VNUM + r"\s*", to_western_digits(getattr(info, "core_version", "") or ""), re.I)
+    if m:
+        return m.group(1), "the file properties"
+    if doc.ext == "docx":
+        for p in [p for p in info.paras if p.text.strip() and not p.in_table][:10]:
+            v = _last(VERSION_IN_TEXT, p.text)
+            if v:
+                return v, "the document text"
+    return None, None
+
+
+def new_name(doc, grade_subject, version):
+    """File name in the guideline pattern [Type]-[Identifier]-[Chapter/Topic]-v[Version].
+    With no version (None) the name has no -v part, so WE1 and WE3 still ask for one."""
     t = TYPE_NAMES.get(doc.doc_type)
     if t is None:
         return None
@@ -72,7 +152,7 @@ def new_name(doc, grade_subject):
         ident = f"Chapter-{doc.chapter}" if doc.chapter is not None else "Chapter"
     else:
         ident = f"Lesson-{doc.lesson}{doc.variant}-Chapter-{doc.chapter}"
-    return f"{t}-{ident}-v{version}.{doc.ext}"
+    return f"{t}-{ident}" + (f"-v{version}" if version else "") + f".{doc.ext}"
 
 
 # ------------------------------------------------------------------------- Word
@@ -151,7 +231,7 @@ def _ensure_heading_style(doc, level):
 
 
 def fix_docx(src, dst, ctx, doc, info):
-    """Write a fixed copy of one .docx; returns (lines for the summary comment, codes settled)."""
+    """Write a fixed copy of one .docx; returns (lines for the summary comment, what was done, e.g. ticked)."""
     from .checks.formatting import doc_headings, grade_sizes, leading_number
     from .checks.guidelines import lp_ranges
     d = Document(src)
@@ -471,7 +551,7 @@ def _nth_table(body, idx):
 
 
 def add_footer(path, name, version):
-    """Footer with document name, version, date and page number on every section."""
+    """Footer with document name, version (left out when there is none), date and page number on every section."""
     d = Document(path)
     for s in d.sections:
         f = s.footer
@@ -479,7 +559,7 @@ def add_footer(path, name, version):
         for p in list(f.paragraphs):
             p._p.getparent().remove(p._p)
         p = f.add_paragraph()
-        p.add_run(f"{name} | v{version} | {date.today().isoformat()} | Page ")
+        p.add_run(f"{name}" + (f" | v{version}" if version else "") + f" | {date.today().isoformat()} | Page ")
         fld = OxmlElement("w:fldSimple")
         fld.set(qn("w:instr"), "PAGE")
         r = OxmlElement("w:r")

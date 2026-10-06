@@ -317,7 +317,10 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
         ctx = Context(pkg, profile, rules or {})
     grade_subject = re.sub(r"[^A-Za-z0-9]+", "-", pkg.subject or "").strip("-")
     work = Path(tempfile.mkdtemp(prefix="course-markup-"))
-    stats = {"documents": 0, "paragraphs": 0, "errors": {}, "renamed": {}}
+    # "open": (path inside the package, finding) for every Fail / needs-reviewer result still standing in the
+    # copies handed out, under the copy's new name; results tied to no file have path None.
+    stats = {"documents": 0, "paragraphs": 0, "errors": {}, "renamed": {}, "open": []}
+    written = {}                              # original path -> (path of the copy, findings written into it)
     try:
         tree = work / root.name
         shutil.copytree(root, tree)
@@ -329,16 +332,19 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
             try:
                 fixed_lines, extra, src = [], {}, d.abs
                 if ctx is not None:
-                    name = autofix.new_name(d, grade_subject)
+                    info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
+                    version, found_in = autofix.find_version(d, info)
+                    name = autofix.new_name(d, grade_subject, version)
+                    base = name.rsplit(".", 1)[0] if name else Path(d.rel).stem
+                    if version:
+                        base = base[: -len(f"-v{version}")] if base.endswith(f"-v{version}") else base
                     staged = work / ("fixed." + d.ext)
                     if d.ext == "docx":
-                        info = ctx.docx(d)
                         if info is not None:
                             fixed_lines, extra = autofix.fix_docx(d.abs, staged, ctx, d, info)
                     else:
-                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)\.pptx$", name or "")
-                        footer = f"{m.group(1)} | v{m.group(2)} | {date.today().isoformat()}" if m else None
-                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer)
+                        footer = f"{base}" + (f" | v{version}" if version else "") + f" | {date.today().isoformat()}"
+                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer if name else None)
                     if fixed_lines:
                         src = str(staged)
                     if name and name != dst.name:
@@ -347,12 +353,14 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                         stats["renamed"][d.rel] = name
                         fixed_lines.append(f"File renamed to {name} (pattern [Type]-[Identifier]-[Chapter]-v[Version])")
                     if d.ext == "docx" and src == str(staged):
-                        base = dst.stem                                   # e.g. Lesson-Plan-Lesson-1-Chapter-2-v0.1
-                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)$", base)
-                        autofix.add_footer(src, m.group(1) if m else base, m.group(2) if m else "0.1")
-                        fixed_lines.append("Footer added: document name, version, date, page number")
-                    fs = [f for f in fs if not autofix.settled(f, d.ext, d.doc_type, extra)]
+                        autofix.add_footer(src, base, version)
+                        fixed_lines.append("Footer added: document name, " + ("version, " if version else "") + "date, page number")
+                    if name and version and found_in != "the file name":
+                        fixed_lines.append(f"Version v{version} taken from {found_in}")
+                    rel = (d.rel.rsplit("/", 1)[0] + "/" if "/" in d.rel else "") + dst.name
+                    fs = autofix.remaining(fs, d.ext, autofix.recheck(ctx, d, src, rel), extra)
                 n = (annotate_docx if d.ext == "docx" else annotate_pptx)(src, dst, fs, fixed_lines)
+                written[d.rel] = (dst.relative_to(tree).as_posix(), fs)
                 stats["documents"] += 1
                 stats["paragraphs"] += n
             except Exception as e:   # a file the libraries cannot rewrite stays as it was, and says so
@@ -360,6 +368,11 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                 stats["errors"][d.rel] = f"{type(e).__name__}: {e}"
                 loose_ends.append(_Note(f"{d.rel}: could not be fixed or marked up ({type(e).__name__}); its results are below"))
                 loose_ends.extend(f for f in fs if f.status in (FAIL, REVIEW))
+                written[d.rel] = (d.rel, by_doc.get(d.rel, []))
+        for rel, fs in by_doc.items():
+            path, fs = written.get(rel, (rel, fs))
+            stats["open"].extend((path, f) for f in fs if f.status in (FAIL, REVIEW) and getattr(f, "code", ""))
+        stats["open"].extend((None, f) for f in findings if not f.doc and f.status in (FAIL, REVIEW))
         (tree / "REVIEW-NOTES.txt").write_text(_notes_text(loose_ends, pkg, rules, stats["renamed"]), encoding="utf-8")
         out_zip = Path(out_zip)
         out_zip.parent.mkdir(parents=True, exist_ok=True)

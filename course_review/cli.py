@@ -58,7 +58,8 @@ def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=No
         say("Writing the workbook and report", 0, 0)
         xlsx = report.write_outputs(pkg, res, rules, layout, checklist, out_dir, Path(zip_path).name, model=model)
         say("Fixing and marking up the documents", 0, 0)
-        annotate.annotate_package(pkg, res.findings, Path(out_dir) / MARKED_UP, rules, profile=profile)
+        res.rules = rules
+        res.markup = annotate.annotate_package(pkg, res.findings, Path(out_dir) / MARKED_UP, rules, profile=profile)
     finally:
         if not keep:
             shutil.rmtree(work, ignore_errors=True)

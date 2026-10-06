@@ -136,6 +136,19 @@ def test_textbook_indexes_in_the_books_folder_are_offered(tmp_path):
     assert b"<option>islamiat</option>" in a.test_client().get("/").data
 
 
+def test_result_page_shows_counts_rules_and_documents(app, tmp_path):
+    c = app.test_client()
+    job = upload(c, zip_bytes(tmp_path)).headers["Location"].rsplit("/", 1)[-1]
+    page = c.get(f"/jobs/{job}").data.decode()
+    meta = c.get(f"/jobs/{job}/status").get_json()
+    assert "fail the checklist" in page and "need a reviewer" in page
+    assert "Still open in the fixed copies" in page and "By fixed document" in page
+    assert "confirm(" in page                                       # deleting asks first
+    home = c.get("/").data.decode()
+    assert 'class="pill p-fail"' in home and "Drop the course package" in home
+    assert meta["state"] == "done"
+
+
 def test_status_file_survives_a_locked_replace_and_progress_errors_do_not_stop_a_review(tmp_path, monkeypatch):
     # Windows refuses os.replace while another handle has the file open; the write must retry, not fail.
     import course_review.web as W
@@ -149,3 +162,22 @@ def test_status_file_survives_a_locked_replace_and_progress_errors_do_not_stop_a
     monkeypatch.setattr(W.os, "replace", flaky)
     W._write_meta(tmp_path, {"state": "running"})
     assert W._read_meta(tmp_path) == {"state": "running"} and calls["n"] == 4
+
+
+def test_lists_describe_the_fixed_copies_not_the_submitted_files(app, tmp_path):
+    import zipfile
+    c = app.test_client()
+    job = upload(c, zip_bytes(tmp_path)).headers["Location"].rsplit("/", 1)[-1]
+    page = c.get(f"/jobs/{job}").data.decode()
+    z = zipfile.ZipFile(io.BytesIO(c.get(f"/jobs/{job}/files/Marked-up-documents.zip").data))
+    copies = {n.rsplit("/", 1)[-1] for n in z.namelist() if n.endswith((".docx", ".pptx"))}
+    import re as _re
+    listed = set(_re.findall(r'<div class="item"><div>([^<]+)<div class="mut small">', page))
+    assert listed and listed <= copies                      # the names of the files in the download
+    assert "WE8</code>" not in page and "WEG1</code>" not in page   # fail as submitted, fixed in the copies: not listed
+    assert "WE8" in c.get(f"/jobs/{job}/files/review.json").data.decode()
+
+
+def test_upload_errors_are_shown_in_red(app):
+    r = app.test_client().post("/jobs", data={"package": (io.BytesIO(b"x"), "notes.txt")}, content_type="multipart/form-data")
+    assert b'class=\'bad\'' in r.data and b".bad{" in r.data

@@ -53,6 +53,7 @@ class PptxInfo:
     char_count: int = 0
     notes_chars: int = 0
     slides_text: list = field(default_factory=list)
+    core_version: str = ""        # the Version field in the file's properties
     footers: list = field(default_factory=list)     # (slide, kind 'ftr'|'sldNum'|'dt', text) of footer placeholders shown
 
 
@@ -81,6 +82,10 @@ def parse_pptx(path) -> PptxInfo:
     prs = Presentation(path)
     info = PptxInfo(path=str(path), width_in=Emu(prs.slide_width).inches, height_in=Emu(prs.slide_height).inches,
                     slides=len(prs.slides))
+    try:
+        info.core_version = prs.core_properties.version or ""
+    except Exception:
+        pass
     # master body line spacing, if defined
     try:
         m = prs.slide_masters[0]._element
