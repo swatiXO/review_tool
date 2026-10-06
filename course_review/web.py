@@ -80,6 +80,8 @@ code{font:600 .85rem ui-monospace,Consolas,monospace;background:var(--soft);padd
 .item:last-child{border-bottom:0}.item>div{flex:1 1 18rem;min-width:0;overflow-wrap:anywhere}
 .item .cat{display:block;color:var(--mut);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
 .item .nums{flex:0 0 auto;display:flex;gap:4px;align-items:center}
+.bad{color:var(--fail);font-weight:600}.ok{color:var(--pass);font-weight:600}.warn{color:var(--rev);font-weight:600}
+.card>p.bad{border-left:5px solid var(--fail);background:var(--fail-bg);padding:12px 14px;border-radius:8px}
 .alert{border-left:5px solid var(--fail);background:var(--fail-bg);padding:12px 14px;border-radius:8px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.88rem;color:var(--mut)}
 .sw{display:inline-block;width:.9em;height:.9em;border-radius:3px;vertical-align:-1px;margin-right:5px}
@@ -152,6 +154,7 @@ JOB = """
 {% endif %}
 </div>
 {% if job.state == 'done' %}
+<p class="mut small">Results for the package as submitted (the same as the workbook):</p>
 <div class="tiles">
   <div class="tile t-fail"><b>{{ counts.get('fail', 0) }}</b><span>fail the checklist</span></div>
   <div class="tile t-rev"><b>{{ counts.get('needs_review', 0) }}</b><span>need a reviewer</span></div>
@@ -174,8 +177,9 @@ JOB = """
   <p class="mut small">Formatting with one right answer (page setup, fonts, sizes, digits, heading numbers, captions, bullets, colour,
   footers, file names) is fixed in the copies; the first comment in each file lists the changes. A blank cell in the workbook means the tool did not decide it.</p>
 </div>
-{% if codes %}<div class="card"><h2>What to look at first</h2>
-  <p class="mut small">Checklist rules with problems in this package, most failures first. Formatting fails are usually already fixed in the downloaded copies.</p>
+{% if job.overview_error %}<div class="card"><p class="warn">The lists of open problems could not be made ({{ job.overview_error }}). The downloads are complete; the report has every result.</p></div>{% endif %}
+{% if codes %}<div class="card"><h2>Still open in the fixed copies</h2>
+  <p class="mut small">What the tool could not fix, by checklist rule, most failures first: the same notes you will find in the downloaded files.</p>
   <div class="items">
   {% for c in codes %}<div class="item"><div><code>{{ c.code }}</code> {% if c.category %}<span class="cat">{{ c.category }}</span>{% endif %}{{ c.title }}
     {% if c.example %}<div class="mut small">e.g. {{ c.example }}</div>{% endif %}</div>
@@ -183,7 +187,7 @@ JOB = """
   </div>
   {% if more_codes %}<p class="mut small">and {{ more_codes }} more rule(s); see the report for all of them.</p>{% endif %}
 </div>{% endif %}
-{% if docs %}<div class="card"><h2>By document</h2>
+{% if docs %}<div class="card"><h2>By fixed document</h2>
   <div class="items">
   {% for d in docs %}<div class="item"><div>{{ d.name }}<div class="mut small">{{ d.folder }}</div></div>
     <span class="nums">{% if d.fail %}<span class="pill p-fail">{{ d.fail }} fail</span>{% endif %}{% if d.review %}<span class="pill p-rev">{{ d.review }} to check</span>{% endif %}</span></div>{% endfor %}
@@ -201,22 +205,21 @@ tick();</script>{% endif %}
 """
 
 
-def _overview(res, rules):
-    """What the job page shows: rules with problems (most fails first) and per-document counts."""
+def _overview(open_items, rules):
+    """The job page's lists: rules with problems still open in the fixed copies (most fails first), and the
+    same per copy, under the copy's new name. open_items is annotate_package's stats["open"]."""
     from .checks.guidelines import GUIDE_RULES
     from .checks.registry import AUTOMATION
-    from .models import FAIL, REVIEW
+    from .models import FAIL
     by_code, by_doc = {}, {}
-    for f in res.findings:
-        if f.status not in (FAIL, REVIEW):
-            continue
+    for path, f in open_items:
         c = by_code.setdefault(f.code, {"code": f.code, "fail": 0, "review": 0, "example": ""})
         c["fail" if f.status == FAIL else "review"] += 1
         if not c["example"] or (f.status == FAIL and c["fail"] == 1):
             c["example"] = f.message or ""
-        if f.doc:
-            d = by_doc.setdefault(f.doc, {"name": f.doc.rsplit("/", 1)[-1], "folder": f.doc.rsplit("/", 1)[0] if "/" in f.doc else "",
-                                          "fail": 0, "review": 0})
+        if path:
+            d = by_doc.setdefault(path, {"name": path.rsplit("/", 1)[-1], "folder": path.rsplit("/", 1)[0] if "/" in path else "",
+                                         "fail": 0, "review": 0})
             d["fail" if f.status == FAIL else "review"] += 1
     for c in by_code.values():
         r = rules.get(c["code"])
@@ -323,14 +326,15 @@ def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", ex
                 if src.exists():
                     shutil.copy2(src, d / name)
             shutil.rmtree(d / "out", ignore_errors=True)
+            overview_error = ""
             try:
-                from .workbook import load_rules
-                codes, docs = _overview(res, load_rules(opts["checklist"])[0])
-            except Exception:                      # the overview is a convenience; the downloads are the result
-                codes, docs = [], []
+                codes, docs = _overview((res.markup or {}).get("open", []), res.rules)
+            except Exception as e:                 # the lists are a convenience; the downloads are the result
+                traceback.print_exc()
+                codes, docs, overview_error = [], [], f"{type(e).__name__}: {e}"
             update(d, state="done", stage="Done", seconds=round(time.time() - started), documents=len(pkg.docs),
                    summary=f"{len(pkg.docs)} documents: {c['fail']} fails, {c['pass']} passes, {c['needs_review']} for a reviewer",
-                   counts=dict(c), codes=codes, docs=docs)
+                   counts=dict(c), codes=codes, docs=docs, overview_error=overview_error)
         except SystemExit as e:                    # a model or book problem reported by the CLI helpers
             update(d, state="failed", error=str(e))
         except Exception as e:

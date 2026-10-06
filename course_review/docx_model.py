@@ -114,6 +114,7 @@ class DocxInfo:
     sections: list = field(default_factory=list)
     footer_text: str = ""
     footer_fields: set = field(default_factory=set)
+    core_version: str = ""        # the Version field in the file's properties
     header_text: str = ""
     has_toc: bool = False
     pages: Optional[int] = None
@@ -376,6 +377,10 @@ def parse_docx(path) -> DocxInfo:
     res = _Resolver(doc)
     numbering = _Numbering(doc)
     info = DocxInfo(path=str(path))
+    try:
+        info.core_version = doc.core_properties.version or ""
+    except Exception:
+        pass
 
     # page setup
     secs = doc.sections

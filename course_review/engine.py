@@ -104,6 +104,23 @@ def cell_note(findings):
     return " | ".join(parts)
 
 
+DERIVED = {"LP10": LP10_COMPONENTS, "FG8": FG8_COMPONENTS}
+
+
+def derived_finding(code, comp):
+    """LP10 / FG8 from the findings of the rules they cover on one document; None when none of them ran."""
+    if not comp:
+        return None
+    fails = [f for f in comp if f.status == FAIL]
+    if fails:
+        msg = "; ".join(f"{f.code}: {f.message}" for f in fails[:3])
+        return result(code, FAIL, msg, [f"{f.code}: {f.message}" for f in fails])
+    if all(f.status in (PASS, NA) and not f.partial for f in comp):
+        return result(code, PASS, "All formatting rules this item covers pass")
+    return result(code, REVIEW, "No failures; some parts need a reviewer: " +
+                  ", ".join(f"{f.code}" for f in comp if f.status == REVIEW or f.partial))
+
+
 class Results:
     def __init__(self):
         self.findings = []
@@ -113,6 +130,8 @@ class Results:
         self.errors = {}
         self.slo_map = []
         self.model_stats = []
+        self.rules = {}            # code -> Rule, as read from the checklist workbook
+        self.markup = None         # what annotate.annotate_package wrote (see its stats)
 
 
 def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
@@ -215,18 +234,10 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
     # 4. derived LP10 / FG8
     def derive(code, components, doc_type):
         for d in [x for x in formatted if x.doc_type == doc_type]:
-            comp = [f for f in F if f.doc == d.rel and f.code in components]
-            if not comp:
-                continue
-            fails = [f for f in comp if f.status == FAIL]
-            if fails:
-                msg = "; ".join(f"{f.code}: {f.message}" for f in fails[:3])
-                F.append(result(code, FAIL, msg, [f"{f.code}: {f.message}" for f in fails], lesson=d.key, doc=d.rel))
-            elif all(f.status in (PASS, NA) and not f.partial for f in comp):
-                F.append(result(code, PASS, "All formatting rules this item covers pass", lesson=d.key, doc=d.rel))
-            else:
-                F.append(result(code, REVIEW, "No failures; some parts need a reviewer: " +
-                                ", ".join(f"{f.code}" for f in comp if f.status == REVIEW or f.partial), lesson=d.key, doc=d.rel))
+            f = derived_finding(code, [f for f in F if f.doc == d.rel and f.code in components])
+            if f is not None:
+                f.lesson, f.doc = d.key, d.rel
+                F.append(f)
     derive("LP10", LP10_COMPONENTS, "lesson_plan")
     derive("FG8", FG8_COMPONENTS, "facilitator_guide")
 

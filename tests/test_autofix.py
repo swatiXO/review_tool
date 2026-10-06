@@ -92,7 +92,7 @@ def test_only_a_fail_the_fixed_copy_no_longer_shows_is_left_out():
         ("WE3", "needs_review", "Version v0.1 is present"),
         ("WE8", "fail", "Body text is 10 pt"),
         ("WE21", "fail", "Citation is not (Author, Year)"),
-        ("LP10", "fail", "WE4 fails")]
+        ("LP10", "fail", "WE8: Body text is 10 pt")]                       # worked out again from the copy
     assert all(f.doc == "Lesson-Plan.docx" for f in kept)
     # a copy that could not be re-checked clears nothing
     assert autofix.remaining(fs, "docx", {}, {}) == fs
@@ -172,3 +172,39 @@ def test_headings_left_unnumbered_keep_their_numbering_comment(tmp_path):
     assert "not numbered" in text
     assert "WE12 FAIL" in text and "LP4 FAIL" in text
     assert "WE13 FAIL" not in text                       # the Heading styles were applied
+
+
+def test_review_items_and_summary_items_follow_the_fixed_copy():
+    from course_review import autofix
+    from course_review.checks.common import result
+    passes = lambda *codes: {c: result(c, "pass", "") for c in codes}
+    # a needs-reviewer item the fix settled is left out (no Table of Contents -> one was added)
+    assert autofix.remaining([result("WE15", "needs_review", "No page count")], "docx",
+                             {"WE15": result("WE15", "pass", "Has a Table of Contents")}, {}) == []
+    # FG8 on a Word Facilitator Guide clears even though WE5 (slides only) never runs on Word files
+    assert autofix.remaining([result("FG8", "fail", "WE6: Poppins missing")], "docx", passes("WE6", "WE7", "WE23"), {}) == []
+    # LP10 with no failing part but one needing a reviewer stays as needs-reviewer, as the engine would say
+    after = {**passes("WE1", "WE2", "WE4", "WE6", "WE7", "WE8"), "WE3": result("WE3", "needs_review", "Stage?")}
+    kept = autofix.remaining([result("LP10", "fail", "WE4: Letter size")], "docx", after, {})
+    assert [(f.code, f.status) for f in kept] == [("LP10", "needs_review")] and "WE3" in kept[0].message
+
+
+def test_version_patterns_do_not_invent_or_lose_versions():
+    from course_review import autofix
+    from course_review.models import DocRef
+
+    class Info:
+        footer_text, core_version, paras = "", "", []
+
+    def version(name="x.docx", footer="", props=""):
+        info = Info()
+        info.footer_text, info.core_version = footer, props
+        return autofix.find_version(DocRef(rel=name, abs="", ext="docx", doc_type="lesson_plan", chapter=1, lesson=1), info)[0]
+    assert version("Lesson-Plan-v2-Final.docx") == "2"                     # not only at the end of the name
+    assert version("LessonPlan v1.0 (1).docx") == "1.0"
+    assert version(footer="Class V 2024") is None                          # a class and a year, not a version
+    assert version(footer="Class V 2") is None
+    assert version(footer="Grade 6 v2024") is None
+    assert version(footer="Sabr | Version 2.1 | Ali") == "2.1"
+    assert version(footer="ورژن ٣") == "3"
+    assert version(props="1.4") == "1.4"
