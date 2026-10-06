@@ -13,7 +13,8 @@ doc_types:
   - {type: data_bank, pattern: 'data[-_ ]*bank', ext: [docx], scope: subject}
   - {type: specification, pattern: 'specification', ext: [docx], scope: subject}
   # Workbook: Chapter Exam is per lesson, Worksheet is per chapter.
-  - {type: chapter_exam, pattern: 'assessment', ext: [docx], scope: lesson}
+  # The per-lesson assessment: the team calls it Assessment, the guidelines call it Worksheet.
+  - {type: chapter_exam, pattern: 'assessment|worksheet', ext: [docx], scope: lesson}
   - type: worksheet
     pattern: 'chapter[-_ ]*exam'
     ext: [docx]
