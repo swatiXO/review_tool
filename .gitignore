@@ -4,3 +4,4 @@ __pycache__/
 review-output/
 sample_output/
 *.zip
+.course_review_cache/
