@@ -31,7 +31,28 @@ RANK = {FAIL: 3, REVIEW: 2, PASS: 1}
 WORD_COLOUR = {FAIL: WD_COLOR_INDEX.RED, REVIEW: WD_COLOR_INDEX.TURQUOISE, PASS: WD_COLOR_INDEX.BRIGHT_GREEN}
 SLIDE_COLOUR = {FAIL: "FF0000", REVIEW: "00FFFF", PASS: "00FF00"}
 LABEL = {FAIL: "FAIL", REVIEW: "CHECK", PASS: "PASS"}
-LEGEND = "Red = fails the checklist. Turquoise = model suggestion, a reviewer decides. Green = passes."
+LEGEND = ("Red = fails the checklist. Turquoise = the model's suggestion: each one has a comment saying what to do "
+          "(you confirm or reject it, then delete it). Green = passes.")
+ACTION = {
+    "pass": "Your call: if you agree it passes, delete this comment and the highlight. If not, replace it with your own "
+            "comment to the creator saying what is missing.",
+    "fail": "Your call: if you agree, reword this as a suggestion to the creator (Comment Workflow) and fill the cell in the "
+            "checklist workbook. If you disagree, delete this comment and the highlight.",
+    "unclear": "The model could not decide: please judge this item yourself.",
+}
+
+
+def _model_lines(f, note, first):
+    """Comment text for a model suggestion: what it suggests, why, and what the reviewer does."""
+    verdict = "fail" if "FAIL" in (note or "") or "Would be fail" in f.message else \
+              "pass" if "PASS" in (note or "") or "Would be pass" in f.message else "unclear"
+    if not first:
+        own = (note or "").replace("model suggests FAIL: ", "").split("; the story")[0]
+        return [f"{_code(f.code)} - model suggests {verdict.upper()}" + (f": {own}" if own and verdict == "fail" else
+                " (one more place it refers to)") + f". Same decision as the first {f.code} comment."]
+    body = (note or f.message).replace("model suggests ", "")
+    head = f"{_code(f.code)} - model suggests {verdict.upper()}, a reviewer decides" if verdict != "unclear" else f"{_code(f.code)} - model could not decide"
+    return [f"{head}: {body.split(': ', 1)[-1] if ': ' in body else body}", ACTION[verdict]]
 MIN_MATCH = 6
 
 
@@ -65,10 +86,11 @@ def _locate(m, para_loose, used, allowed=None):
     ok = (lambda i: True) if allowed is None else allowed
     if not m.get("exact", True):
         return [i for i in _matches(_pieces(m["text"]), para_loose) if ok(i)]
-    key = _loose(m["text"])
+    key = _unnumbered(_loose(m["text"]))
     if not key:
         return []
-    cands = [i for i, t in enumerate(para_loose) if t == key and ok(i)]
+    # a heading the fixer numbered ('4.5 ...') still matches its unnumbered text, before any containment match
+    cands = [i for i, t in enumerate(para_loose) if (t == key or _unnumbered(t) == key) and ok(i)]
     if not cands and len(key) >= MIN_MATCH:
         cands = [i for i, t in enumerate(para_loose) if key in t and ok(i)]
     if not cands:
@@ -87,6 +109,10 @@ OUTPUT_NAME = {"CE": "Assessment", "WS": "Chapter Exam"}
 def _code(code):
     name = OUTPUT_NAME.get(re.sub(r"\d+$", "", code))
     return f"{code} ({name})" if name else code
+
+
+def _unnumbered(loose_text):
+    return re.sub(r"^(?:\d+\s+)+", "", loose_text or "")
 
 
 def _line(f, note=""):
@@ -124,11 +150,19 @@ def annotate_docx(src, dst, findings, fixed=None):
     unplaced = []
     for f in _relevant(findings):
         placed, used = False, set()
-        for m in f.marks:
-            for i in _locate(m, loose, used):
-                # a model suggestion quotes several places: comment once, highlight the rest
-                once = f.method == "model" and placed
-                per_para[i].append((f.status, None if once else _line(f, m.get("note"))))
+        model = f.method == "model"
+        marks = f.marks
+        if model and ("PASS" in (marks[0].get("note", "") if marks else "") or "Would be pass" in f.message):
+            marks = marks[:1]             # a suggested pass needs one place to confirm it, not every passage it read
+        suggested_pass = model and marks is not f.marks
+        for m in marks:
+            hits = _locate(m, loose, used)
+            if suggested_pass:
+                hits = hits[:1]               # a quote can span paragraphs (a table); one place is enough to confirm a pass
+            for i in hits:
+                lines = _model_lines(f, m.get("note"), not placed) if model else [_line(f, m.get("note"))]
+                for l in lines:
+                    per_para[i].append((f.status, l))
                 placed = True
         if not placed and f.status != PASS:
             unplaced.append(f)
@@ -202,12 +236,18 @@ def annotate_pptx(src, dst, findings, fixed=None):
     unplaced = []
     for f in _relevant(findings):
         placed, used = False, set()
-        for m in f.marks:
+        model = f.method == "model"
+        marks = f.marks
+        if model and ("PASS" in (marks[0].get("note", "") if marks else "") or "Would be pass" in f.message):
+            marks = marks[:1]
+        for m in marks:
             on_slide = None if m.get("slide") is None else (lambda i, s=m["slide"]: slide_paras[i][0] == s)
-            for i in _locate(m, loose, used, on_slide):
+            hits = _locate(m, loose, used, on_slide)
+            for i in (hits[:1] if model and marks is not f.marks else hits):
                 n = slide_paras[i][0]
                 marked_paras[i].append(f.status)
-                notes[n].append((f.status, _line(f, m.get("note"))))
+                for l in (_model_lines(f, m.get("note"), not placed) if model else [_line(f, m.get("note"))]):
+                    notes[n].append((f.status, l))
                 placed = True
         if not placed and f.status != PASS:
             unplaced.append(f)
