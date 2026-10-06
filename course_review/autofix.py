@@ -310,8 +310,18 @@ def fix_docx(src, dst, ctx, doc, info):
             if t is not None:
                 t.text = "• " + t.text.lstrip()
             bulleted += 1
+    # SLO items written as plain paragraphs -> bullets (LP5)
+    if doc.doc_type == "lesson_plan":
+        from .checks.lessonplan import lp5
+        plain = {m["text"] for m in lp5(ctx, doc, info).marks}
+        for p in info.paras:
+            if p.text.strip() in plain and p.list_kind != "decimal":
+                t = next((t for t in els[p.idx].iter(qn("w:t")) if (t.text or "").strip()), None)
+                if t is not None:
+                    t.text = "• " + t.text.lstrip()
+                    bulleted += 1
     if bulleted:
-        lines.append(f"{bulleted} numbered list item(s) turned into bullets")
+        lines.append(f"{bulleted} numbered or plain list item(s) turned into bullets")
 
     # check marks on correct answers -> yellow highlight
     ticked = 0

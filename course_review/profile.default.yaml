@@ -66,6 +66,13 @@ vocab:
   lesson_plan_location_labels: ["Lesson Plan Location", "سبق کے منصوبے میں مقام"]     # Pop Quiz template, English and Urdu
   feedback_labels: ["Correct feedback", "Incorrect feedback", "درست فیڈبیک", "غلط فیڈبیک"]
   answer_key_labels: ["Answer Key", "Answers", "جوابات", "جواب نامہ", "کلید جوابات"]
+  # sub-labels inside an SLO section (Knowledge / Skills / Attitude); they do not end the SLO list
+  slo_sublabels: ["Knowledge", "Skills", "Skill", "Attitude", "Values", "علم", "صلاحیت", "صلاحیتیں", "رویہ", "رویے", "اقدار"]
+  # sentences that introduce the SLO list rather than being an SLO
+  slo_lead_ins: ["By the end", "At the end", "Students will be able to", "اس سبق کے اختتام", "سبق کے اختتام پر", "اس سبق کو پڑھنے کے بعد", "اس سبق کو پڑھن"]
+  # lines that end an SLO list: instructions and notes that follow it
+  slo_block_end_labels: ["Note", "Notes", "Instruction", "Instructions", "For teachers", "Teacher", "نوٹ", "ہدایت", "ہدایات",
+                         "برائے اساتذہ", "اساتذہ کے لیے", "طلبہ کے لیے"]
   # lines that start with these are labels inside a question (answer, hint), never section headings
   answer_line_labels: ["Answer", "Model answer", "Sample answer", "Hint", "مثالی جواب", "جواب", "اشارہ"]
   caption_prefixes:

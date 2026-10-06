@@ -197,3 +197,23 @@ def test_unrecognised_question_format_is_reviewed_not_failed(tmp_path):
     info = questions_doc(tmp_path, [f"{r}. What is it?" for r in ("i", "ii", "iii", "iv", "v", "vi")])
     res = {f.code: f for f in A.exam_checks(make_ctx(), ref(doc_type="chapter_exam"), info, "chapter_exam")}
     assert res["CE1"].status == REVIEW and "not be supported" in res["CE1"].message
+
+
+def test_lp5_slo_list_ends_at_the_next_heading_or_note_not_the_end_of_the_document(tmp_path):
+    # Chapter 1 of the sample is not built on the five sections: an SLO block is followed by notes and content.
+    d = new_doc()
+    add(d, "Chapter 1: Quran", bold=True)
+    add(d, "SLOs", bold=True)
+    add(d, "Knowledge", bold=True)
+    add(d, "• Understand the translation of the surahs")
+    add(d, "Explain the background of the surahs")          # plain paragraph: not a bullet
+    add(d, "Note: read these three surahs again")
+    add(d, "Surah Al-Fatiha")
+    for i in range(30):
+        add(d, f"Content line {i} that is not an SLO.")
+    add(d, "B - Memorisation", bold=True)
+    add(d, "SLOs", bold=True)
+    add(d, "•Recite the surahs in prayer")                     # bullet without a space after it
+    r = LP.lp5(make_ctx(), ref(), parse_docx(save(d, tmp_path)))
+    assert r.status == FAIL and "1 of 3 SLO items in 2 SLO sections" in r.message
+    assert [m["text"] for m in r.marks] == ["Explain the background of the surahs"]

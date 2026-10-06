@@ -55,7 +55,8 @@ def _paras(info, rng):
 
 
 def _is_bullet(p):
-    return p.list_kind == "bullet" or bool(re.match(r"^\s*[•\-–—*▪●◦]\s", p.text))
+    from .lessonplan import is_bullet_text
+    return p.list_kind == "bullet" or is_bullet_text(p.text)
 
 
 def _is_numbered(p):
