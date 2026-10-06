@@ -134,3 +134,16 @@ def test_textbook_indexes_in_the_books_folder_are_offered(tmp_path):
     (tmp_path / "books" / "islamiat" / "pages").mkdir(parents=True)
     a = create_app(jobs_dir=str(tmp_path / "jobs"), checklist=None, books_dir=str(tmp_path / "books"), executor=SyncExecutor())
     assert b"<option>islamiat</option>" in a.test_client().get("/").data
+
+
+def test_result_page_shows_counts_rules_and_documents(app, tmp_path):
+    c = app.test_client()
+    job = upload(c, zip_bytes(tmp_path)).headers["Location"].rsplit("/", 1)[-1]
+    page = c.get(f"/jobs/{job}").data.decode()
+    meta = c.get(f"/jobs/{job}/status").get_json()
+    assert "fail the checklist" in page and "need a reviewer" in page
+    assert "What to look at first" in page and "By document" in page
+    assert "confirm(" in page                                       # deleting asks first
+    home = c.get("/").data.decode()
+    assert 'class="pill p-fail"' in home and "Drop the course package" in home
+    assert meta["state"] == "done"

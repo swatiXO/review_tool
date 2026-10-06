@@ -82,5 +82,5 @@ From the same review of `0a2d3a2`, still open:
 
 * the footer fixer deletes any existing footer (logos, template text) and writes the file name as
   the "name";
-* a file without a version is renamed to `v0.1` (it now at least keeps the WE3 comment asking a
-  person to confirm it).
+* ~~a file without a version is renamed to `v0.1`~~: fixed next, see
+  [fix-version-and-web-page.md](fix-version-and-web-page.md).
