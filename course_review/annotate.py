@@ -289,16 +289,19 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
             try:
                 fixed_lines, extra, src = [], {}, d.abs
                 if ctx is not None:
-                    name = autofix.new_name(d, grade_subject)
+                    info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
+                    version, found_in = autofix.find_version(d, info)
+                    name = autofix.new_name(d, grade_subject, version)
+                    base = name.rsplit(".", 1)[0] if name else Path(d.rel).stem
+                    if version:
+                        base = base[: -len(f"-v{version}")] if base.endswith(f"-v{version}") else base
                     staged = work / ("fixed." + d.ext)
                     if d.ext == "docx":
-                        info = ctx.docx(d)
                         if info is not None:
                             fixed_lines, extra = autofix.fix_docx(d.abs, staged, ctx, d, info)
                     else:
-                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)\.pptx$", name or "")
-                        footer = f"{m.group(1)} | v{m.group(2)} | {date.today().isoformat()}" if m else None
-                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer)
+                        footer = f"{base}" + (f" | v{version}" if version else "") + f" | {date.today().isoformat()}"
+                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer if name else None)
                     if fixed_lines:
                         src = str(staged)
                     if name and name != dst.name:
@@ -307,10 +310,10 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                         stats["renamed"][d.rel] = name
                         fixed_lines.append(f"File renamed to {name} (pattern [Type]-[Identifier]-[Chapter]-v[Version])")
                     if d.ext == "docx" and src == str(staged):
-                        base = dst.stem                                   # e.g. Lesson-Plan-Lesson-1-Chapter-2-v0.1
-                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)$", base)
-                        autofix.add_footer(src, m.group(1) if m else base, m.group(2) if m else "0.1")
-                        fixed_lines.append("Footer added: document name, version, date, page number")
+                        autofix.add_footer(src, base, version)
+                        fixed_lines.append("Footer added: document name, " + ("version, " if version else "") + "date, page number")
+                    if name and version and found_in != "the file name":
+                        fixed_lines.append(f"Version v{version} taken from {found_in}")
                     rel = (d.rel.rsplit("/", 1)[0] + "/" if "/" in d.rel else "") + dst.name
                     fs = autofix.remaining(fs, d.ext, autofix.recheck(ctx, d, src, rel), extra)
                 n = (annotate_docx if d.ext == "docx" else annotate_pptx)(src, dst, fs, fixed_lines)

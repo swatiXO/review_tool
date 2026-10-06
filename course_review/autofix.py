@@ -97,11 +97,48 @@ TYPE_NAMES = {"lesson_plan": "Lesson-Plan", "chapter_exam": "Assessment", "facil
 TICKS = re.compile(r"^\s*[✅✔☑✓]️?\s*")
 
 
-def new_name(doc, grade_subject):
-    """File name in the guideline pattern [Type]-[Identifier]-[Chapter/Topic]-v[Version], keeping any version."""
+VERSION_IN_NAME = re.compile(r"-?v(\d+(?:\.\d+)*)\s*$", re.I)
+VERSION_IN_FOOTER = re.compile(r"(?:\bversion|\bver\.|ورژن|(?<![A-Za-z])v)\s*[:#]?\s*(\d+(?:\.\d+)*)", re.I)
+VERSION_IN_TEXT = re.compile(r"(?:\bversion|ورژن)\s*[:#]?\s*(\d+(?:\.\d+)*)", re.I)
+
+
+def find_version(doc, info):
+    """The document's own version and where it was found, or (None, None).
+
+    Looked for in the file name, then the footer, then the file's properties, then an explicit
+    'Version 1.2' line near the top. A version is never made up: one the tool cannot find is left
+    for the writer to add (WE3 stays a Fail with its comment)."""
     stem = doc.rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    m = re.search(r"-?v(\d+(?:\.\d+)*)\s*$", stem.replace(" ", ""), re.I)
-    version = m.group(1) if m else "0.1"
+    m = VERSION_IN_NAME.search(to_western_digits(stem).replace(" ", ""))
+    if m:
+        return m.group(1), "the file name"
+    if info is not None:
+        footer = info.footer_text if doc.ext == "docx" else " ".join(t for _, _, t in info.footers)
+        m = VERSION_IN_FOOTER.search(to_western_digits(footer or ""))
+        if m:
+            return m.group(1), "the footer"
+    try:
+        if doc.ext == "docx":
+            props = Document(doc.abs).core_properties
+        else:
+            from pptx import Presentation
+            props = Presentation(doc.abs).core_properties
+        m = re.fullmatch(r"\s*v?\s*(\d+(?:\.\d+)*)\s*", to_western_digits(props.version or ""), re.I)
+        if m:
+            return m.group(1), "the file properties"
+    except Exception:
+        pass
+    if doc.ext == "docx" and info is not None:
+        for p in [p for p in info.paras if p.text.strip() and not p.in_table][:10]:
+            m = VERSION_IN_TEXT.search(to_western_digits(p.text))
+            if m:
+                return m.group(1), "the document text"
+    return None, None
+
+
+def new_name(doc, grade_subject, version):
+    """File name in the guideline pattern [Type]-[Identifier]-[Chapter/Topic]-v[Version].
+    With no version (None) the name has no -v part, so WE1 and WE3 still ask for one."""
     t = TYPE_NAMES.get(doc.doc_type)
     if t is None:
         return None
@@ -111,7 +148,7 @@ def new_name(doc, grade_subject):
         ident = f"Chapter-{doc.chapter}" if doc.chapter is not None else "Chapter"
     else:
         ident = f"Lesson-{doc.lesson}{doc.variant}-Chapter-{doc.chapter}"
-    return f"{t}-{ident}-v{version}.{doc.ext}"
+    return f"{t}-{ident}" + (f"-v{version}" if version else "") + f".{doc.ext}"
 
 
 # ------------------------------------------------------------------------- Word
@@ -498,7 +535,7 @@ def _nth_table(body, idx):
 
 
 def add_footer(path, name, version):
-    """Footer with document name, version, date and page number on every section."""
+    """Footer with document name, version (left out when there is none), date and page number on every section."""
     d = Document(path)
     for s in d.sections:
         f = s.footer
@@ -506,7 +543,7 @@ def add_footer(path, name, version):
         for p in list(f.paragraphs):
             p._p.getparent().remove(p._p)
         p = f.add_paragraph()
-        p.add_run(f"{name} | v{version} | {date.today().isoformat()} | Page ")
+        p.add_run(f"{name}" + (f" | v{version}" if version else "") + f" | {date.today().isoformat()} | Page ")
         fld = OxmlElement("w:fldSimple")
         fld.set(qn("w:instr"), "PAGE")
         r = OxmlElement("w:r")

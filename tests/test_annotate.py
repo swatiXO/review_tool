@@ -112,9 +112,9 @@ def test_review_writes_a_marked_up_zip_with_notes(tmp_path):
     z = zipfile.ZipFile(out / cli.MARKED_UP)
     names = z.namelist()
     assert any(n.endswith("REVIEW-NOTES.txt") for n in names)
-    assert any(n.endswith("Lesson-Plan-Lesson-1-Chapter-1-v0.1.docx") for n in names)      # renamed to the pattern
+    assert any(n.endswith("Lesson-Plan-Lesson-1-Chapter-1.docx") for n in names)      # renamed to the pattern
     assert not any(n.endswith("Lesson-1-Chapter-1-Lesson-Plan.docx") for n in names)
-    lp = next(n for n in names if n.endswith("Lesson-Plan-Lesson-1-Chapter-1-v0.1.docx"))
+    lp = next(n for n in names if n.endswith("Lesson-Plan-Lesson-1-Chapter-1.docx"))
     (tmp_path / "lp.docx").write_bytes(z.read(lp))
     top = comment_texts(tmp_path / "lp.docx")[-1]
     assert "Fixed by the tool" in top and "A4" in top

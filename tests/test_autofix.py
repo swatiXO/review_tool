@@ -11,7 +11,7 @@ from helpers import A4, add, checklist, new_doc, zip_dir
 URDU = "صبر کا مطلب ہے رکنا اور برداشت کرنا۔"
 
 
-def package(tmp_path):
+def package(tmp_path, lp_name="Lesson-2-Chapter-4-Lesson-Plan.docx", footer=None):
     root = tmp_path / "Grade-6-Islamiat"
     lesson = root / "Chapter-4-Akhlaq" / "Lesson-2-Sabr"
     lesson.mkdir(parents=True)
@@ -24,7 +24,9 @@ def package(tmp_path):
     d.add_paragraph("دوسرا نکتہ", style="List Number")
     t = d.add_table(rows=2, cols=2)
     t.cell(0, 0).text, t.cell(1, 0).text = "عنوان", "متن"
-    d.save(str(lesson / "Lesson-2-Chapter-4-Lesson-Plan.docx"))
+    if footer:
+        d.sections[0].footer.paragraphs[0].text = footer
+    d.save(str(lesson / lp_name))
     pq = new_doc()
     add(pq, "Pop Quiz")
     add(pq, "سبق 2: صبر و تحمل", bold=True)
@@ -44,15 +46,15 @@ def statuses(out, name):
 def test_mechanical_rules_pass_after_fixing(tmp_path):
     out1, out2 = tmp_path / "o1", tmp_path / "o2"
     cl = str(checklist(tmp_path))
-    cli.review(package(tmp_path), cl, str(out1))
-    before = statuses(out1, "Lesson-2-Chapter-4-Lesson-Plan.docx")
-    for code in ("WE1", "WE4", "WE8", "WE10", "WE13", "WE16", "WE23", "WE25", "WEG1", "WEG2"):
+    cli.review(package(tmp_path, "Lesson-2-Chapter-4-Lesson-Plan-v1.2.docx"), cl, str(out1))
+    before = statuses(out1, "Lesson-2-Chapter-4-Lesson-Plan-v1.2.docx")
+    for code in ("WE4", "WE8", "WE10", "WE13", "WE16", "WE23", "WE25", "WEG1", "WEG2"):
         assert before[code] == "fail", code
     fixed = out1 / cli.MARKED_UP
     names = zipfile.ZipFile(fixed).namelist()
-    assert any(n.endswith("Lesson-Plan-Lesson-2-Chapter-4-v0.1.docx") for n in names)
+    assert any(n.endswith("Lesson-Plan-Lesson-2-Chapter-4-v1.2.docx") for n in names)     # the file's own version kept
     cli.review(str(fixed), cl, str(out2))
-    after = statuses(out2, "Lesson-Plan-Lesson-2-Chapter-4-v0.1.docx")
+    after = statuses(out2, "Lesson-Plan-Lesson-2-Chapter-4-v1.2.docx")
     for code in ("WE1", "WE4", "WE7", "WE8", "WE10", "WE11", "WE12", "WE13", "WE16", "WE25", "WEG1", "WEG2"):
         assert after[code] == "pass", (code, after[code])
     assert after["WE23"] == "pass" or "highlight" in json.dumps(json.load(open(out2 / "review.json", encoding="utf-8")))
@@ -96,13 +98,28 @@ def test_only_a_fail_the_fixed_copy_no_longer_shows_is_left_out():
     assert autofix.remaining(fs, "docx", {}, {}) == fs
 
 
-def test_fixed_copy_still_asks_about_what_the_fix_cannot_decide(tmp_path):
+def fixed_lesson_plan(tmp_path, **kw):
     from docx import Document
     out = tmp_path / "o"
-    cli.review(package(tmp_path), str(checklist(tmp_path)), str(out))
+    cli.review(package(tmp_path, **kw), str(checklist(tmp_path)), str(out))
     z = zipfile.ZipFile(out / cli.MARKED_UP)
-    name = next(n for n in z.namelist() if n.endswith("Lesson-Plan-Lesson-2-Chapter-4-v0.1.docx"))
+    name = next(n for n in z.namelist() if "Lesson-Plan" in n)
     z.extract(name, tmp_path / "x")
-    text = "\n".join(c.text for c in Document(str(tmp_path / "x" / name)).comments)
-    assert "WE3 CHECK" in text                 # the version the tool wrote must still be confirmed by a person
+    d = Document(str(tmp_path / "x" / name))
+    return name, d, "\n".join(c.text for c in d.comments)
+
+
+def test_no_version_is_made_up(tmp_path):
+    name, d, text = fixed_lesson_plan(tmp_path)
+    assert name.endswith("/Lesson-Plan-Lesson-2-Chapter-4.docx")          # renamed, but no invented -v0.1
+    assert "v0.1" not in d.sections[0].footer.paragraphs[0].text
+    assert "WE3 FAIL" in text                  # the writer is still asked to add the version
     assert "WE4 FAIL" not in text and "WE8 FAIL" not in text
+
+
+def test_version_is_taken_from_the_footer(tmp_path):
+    name, d, text = fixed_lesson_plan(tmp_path, footer="Sabr lesson plan | Version 2.1 | Ali")
+    assert name.endswith("/Lesson-Plan-Lesson-2-Chapter-4-v2.1.docx")
+    assert "v2.1" in d.sections[0].footer.paragraphs[0].text
+    assert "Version v2.1 taken from the footer" in text
+    assert "WE3 CHECK" in text                 # a person still confirms it matches the document's stage
