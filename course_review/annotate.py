@@ -15,6 +15,7 @@ import shutil
 import tempfile
 import zipfile
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 from docx import Document
@@ -23,7 +24,7 @@ from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
 from .models import FAIL, PASS, REVIEW
-from .textutil import normalize
+from .textutil import normalize, to_western_digits
 
 AUTHOR, INITIALS = "Course Review", "CR"
 RANK = {FAIL: 3, REVIEW: 2, PASS: 1}
@@ -35,7 +36,7 @@ MIN_MATCH = 6
 
 
 def _loose(text):
-    t = re.sub(r"[^\w\s]", " ", normalize(text or ""))
+    t = re.sub(r"[^\w\s]", " ", to_western_digits(normalize(text or "")))
     return re.sub(r"\s+", " ", t).strip().lower()
 
 
@@ -113,8 +114,9 @@ def _text_runs(par):
     return [r for r in par.runs if r.text.strip()]
 
 
-def annotate_docx(src, dst, findings):
-    """Write a marked-up copy of one .docx; returns how many paragraphs were marked."""
+def annotate_docx(src, dst, findings, fixed=None):
+    """Write a marked-up copy of one .docx; returns how many paragraphs were marked. `fixed` lists what
+    the tool already corrected in this copy, for the summary comment."""
     doc = Document(src)
     paras = _all_paragraphs(doc)
     loose = [_loose(p.text) for p in paras]
@@ -124,7 +126,9 @@ def annotate_docx(src, dst, findings):
         placed, used = False, set()
         for m in f.marks:
             for i in _locate(m, loose, used):
-                per_para[i].append((f.status, _line(f, m.get("note"))))
+                # a model suggestion quotes several places: comment once, highlight the rest
+                once = f.method == "model" and placed
+                per_para[i].append((f.status, None if once else _line(f, m.get("note"))))
                 placed = True
         if not placed and f.status != PASS:
             unplaced.append(f)
@@ -132,7 +136,7 @@ def annotate_docx(src, dst, findings):
     for i, items in sorted(per_para.items()):
         runs = _text_runs(paras[i])
         if not runs:
-            unplaced_lines = [l for _, l in items]
+            unplaced_lines = [l for _, l in items if l]
             per_para[i] = []
             unplaced.extend(_Note(l) for l in unplaced_lines)
             continue
@@ -140,17 +144,23 @@ def annotate_docx(src, dst, findings):
         for r in runs:
             if r.font.highlight_color is None and r._r.find(qn("w:rPr") + "/" + qn("w:shd")) is None:
                 r.font.highlight_color = colour
-        _comment(doc, runs, list(dict.fromkeys(l for _, l in items)))
+        lines = list(dict.fromkeys(l for _, l in items if l))
+        if lines:
+            _comment(doc, runs, lines)
 
     first = next((p for p in paras if _text_runs(p)), None)
     if first is not None:
         problems = [f for f in unplaced if f.status in (FAIL, REVIEW)]
         lines = ["Course Review of this document. " + LEGEND]
+        if fixed:
+            lines.append("Fixed by the tool in this copy:")
+            lines += [f"- {l}" for l in fixed]
         if problems:
             lines.append("Whole-document results:")
             lines += [f"- {_line(f)}" for f in problems]
         marked = sum(1 for v in per_para.values() if v)
-        lines.append(f"{marked} paragraph(s) are highlighted in the text below." if marked else "Nothing in the text itself is highlighted.")
+        lines.append(f"{marked} paragraph(s) are highlighted in the text below for a person to check."
+                     if marked else "Nothing in the text itself needs a person's attention.")
         _comment(doc, _text_runs(first)[:1], lines)
     doc.save(dst)
     return sum(1 for v in per_para.values() if v)
@@ -172,7 +182,7 @@ def _comment(doc, runs, lines):
 
 # ---------------------------------------------------------------------- PowerPoint
 
-def annotate_pptx(src, dst, findings):
+def annotate_pptx(src, dst, findings, fixed=None):
     from pptx import Presentation
     from pptx.dml.color import RGBColor
     from pptx.util import Emu, Pt
@@ -219,7 +229,8 @@ def annotate_pptx(src, dst, findings):
 
     if slides:
         problems = [f for f in unplaced if f.status in (FAIL, REVIEW)]
-        top = [(FAIL, "Course Review. " + LEGEND)] + [(f.status, _line(f)) for f in problems]
+        top = [(FAIL, "Course Review. " + LEGEND)] + [(PASS, "Fixed by the tool: " + l) for l in (fixed or [])] + \
+              [(f.status, _line(f)) for f in problems]
         notes[1] = top + notes.get(1, [])
     for n, items in notes.items():
         lines = list(dict.fromkeys(l for _, l in items))
@@ -251,49 +262,84 @@ def _shapes(shapes):
 
 # ------------------------------------------------------------------------ package
 
-def annotate_package(pkg, findings, out_zip, rules=None):
-    """Zip of the whole package with each .docx/.pptx marked up, plus REVIEW-NOTES.txt."""
+def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True):
+    """Zip of the whole package with each .docx/.pptx fixed where the rules are mechanical and
+    commented where a person must decide, plus REVIEW-NOTES.txt."""
+    from . import autofix
     root = Path(pkg.root)
     by_doc = defaultdict(list)
     loose_ends = []
     for f in findings:
         (by_doc[f.doc] if f.doc else loose_ends).append(f)
+    ctx = None
+    if fix and profile is not None:
+        from .engine import Context
+        ctx = Context(pkg, profile, rules or {})
+    grade_subject = re.sub(r"[^A-Za-z0-9]+", "-", pkg.subject or "").strip("-")
     work = Path(tempfile.mkdtemp(prefix="course-markup-"))
-    stats = {"documents": 0, "paragraphs": 0, "errors": {}}
+    stats = {"documents": 0, "paragraphs": 0, "errors": {}, "renamed": {}}
     try:
         tree = work / root.name
         shutil.copytree(root, tree)
         for d in pkg.docs:
             fs = by_doc.get(d.rel, [])
-            if d.ext not in ("docx", "pptx") or not fs:
+            if d.ext not in ("docx", "pptx") or not fs or d.superseded:
                 continue
             dst = tree / d.rel
             try:
-                n = (annotate_docx if d.ext == "docx" else annotate_pptx)(d.abs, dst, fs)
+                fixed_lines, extra, src = [], {}, d.abs
+                if ctx is not None:
+                    name = autofix.new_name(d, grade_subject)
+                    staged = work / ("fixed." + d.ext)
+                    if d.ext == "docx":
+                        info = ctx.docx(d)
+                        if info is not None:
+                            fixed_lines, extra = autofix.fix_docx(d.abs, staged, ctx, d, info)
+                    else:
+                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)\.pptx$", name or "")
+                        footer = f"{m.group(1)} | v{m.group(2)} | {date.today().isoformat()}" if m else None
+                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer)
+                    if fixed_lines:
+                        src = str(staged)
+                    if name and name != dst.name:
+                        dst.unlink(missing_ok=True)
+                        dst = dst.with_name(name)
+                        stats["renamed"][d.rel] = name
+                        fixed_lines.append(f"File renamed to {name} (pattern [Type]-[Identifier]-[Chapter]-v[Version])")
+                    if d.ext == "docx" and src == str(staged):
+                        base = dst.stem                                   # e.g. Lesson-Plan-Lesson-1-Chapter-2-v0.1
+                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)$", base)
+                        autofix.add_footer(src, m.group(1) if m else base, m.group(2) if m else "0.1")
+                        fixed_lines.append("Footer added: document name, version, date, page number")
+                    fs = [f for f in fs if not autofix.settled(f, d.ext, d.doc_type, extra)]
+                n = (annotate_docx if d.ext == "docx" else annotate_pptx)(src, dst, fs, fixed_lines)
                 stats["documents"] += 1
                 stats["paragraphs"] += n
             except Exception as e:   # a file the libraries cannot rewrite stays as it was, and says so
-                shutil.copy2(d.abs, dst)
+                shutil.copy2(d.abs, tree / d.rel)
                 stats["errors"][d.rel] = f"{type(e).__name__}: {e}"
-                loose_ends.append(_Note(f"{d.rel}: could not be marked up ({type(e).__name__}); its results are below"))
+                loose_ends.append(_Note(f"{d.rel}: could not be fixed or marked up ({type(e).__name__}); its results are below"))
                 loose_ends.extend(f for f in fs if f.status in (FAIL, REVIEW))
-        (tree / "REVIEW-NOTES.txt").write_text(_notes_text(loose_ends, pkg, rules), encoding="utf-8")
+        (tree / "REVIEW-NOTES.txt").write_text(_notes_text(loose_ends, pkg, rules, stats["renamed"]), encoding="utf-8")
         out_zip = Path(out_zip)
         out_zip.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
             for p in sorted(tree.rglob("*")):
-                if p.is_file():
+                if p.is_file() and not p.name.startswith("fixed."):
                     z.write(p, p.relative_to(work).as_posix())
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return stats
 
 
-def _notes_text(findings, pkg, rules):
+def _notes_text(findings, pkg, rules, renamed=None):
     lines = ["Course Review notes", "",
-             "Open each Word or PowerPoint file: problems are highlighted in the text with a comment saying which",
-             "checklist item they break. " + LEGEND, "",
-             "Results that do not belong to one file:", ""]
+             "Formatting rules with one right answer (page setup, fonts, sizes, digits, heading numbers and styles,",
+             "table captions, bullets, colour, footers, file names) have been fixed in these copies; each file's first",
+             "comment lists what was changed. What needs a person is highlighted with a comment. " + LEGEND, ""]
+    if renamed:
+        lines += ["Files renamed to the guideline pattern:"] + [f"- {old}  ->  {new}" for old, new in sorted(renamed.items())] + [""]
+    lines += ["Results that do not belong to one file:", ""]
     groups = defaultdict(lambda: ([], []))   # (status, message) -> (codes, places)
     for f in findings:
         if f.status not in (FAIL, REVIEW):

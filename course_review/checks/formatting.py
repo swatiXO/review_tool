@@ -344,6 +344,17 @@ def _is_question_label(ctx, t):
     return bool(rx.match(to_western_digits(normalize(t))))
 
 
+def own_number(ctx, text):
+    """'سبق 1: ...' / 'Lesson 3 - ...' / 'باب دوم: ...' / 'Chapter 2: ...' are lesson and chapter labels that carry
+    their own number. They are not section headings to number 1, 1.1 (and numbering them would break how the
+    Pop Quiz and Data Bank are split into lessons)."""
+    t = to_western_digits(normalize(text)).strip().lower()
+    labels = [normalize(x).lower() for x in ctx.profile["vocab"].get("lesson_heading_prefixes", []) + ["باب", "chapter"]]
+    ordinals = [normalize(w).lower() for ws in ctx.profile["vocab"].get("chapter_ordinals", {}).values() for w in ws]
+    alt = "|".join(map(re.escape, ordinals)) or "x^"
+    return any(re.match(rf"^{re.escape(l)}\s*[:\-–]?\s*(?:\d+|{alt})(?![\w])", t) for l in labels)
+
+
 def heading_like(ctx, p):
     if p.in_table or not p.text.strip() or p.in_toc:
         return False
@@ -352,6 +363,8 @@ def heading_like(ctx, p):
     t = p.text.strip()
     if _is_question_label(ctx, t):
         return False                  # 'سوال ١ (...)' / 'Question 3:' is a question, not a section heading
+    if own_number(ctx, t):
+        return False
     nt = normalize(t).lower()
     if any(nt.startswith(normalize(l).lower()) for l in ctx.profile["vocab"].get("answer_line_labels", [])):
         return False                  # 'Model answer: ...' inside a question

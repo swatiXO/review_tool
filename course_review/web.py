@@ -92,12 +92,13 @@ JOB = """
   <p class="bad">The review could not finish.</p><p>{{ job.error }}</p>
 {% else %}
   <p class="ok">Done in {{ job.seconds }} s: {{ job.summary }}</p>
-  <div class="row"><a class="btn" href="{{ url_for('download', job_id=job.id, name='Marked-up-documents.zip') }}">Download marked-up documents</a>
+  <div class="row"><a class="btn" href="{{ url_for('download', job_id=job.id, name='Marked-up-documents.zip') }}">Download fixed documents</a>
   <a href="{{ url_for('download', job_id=job.id, name='Course-Review-Checklist-filled.xlsx') }}">Filled workbook</a>
   <a href="{{ url_for('download', job_id=job.id, name='report.html') }}" target="_blank">Open the report</a>
   <a href="{{ url_for('download', job_id=job.id, name='review.json') }}">JSON</a></div>
-  <p class="mut">In the marked-up documents: red = fails the checklist, turquoise = model suggestion for a reviewer, green = passes.
-  Each highlight has a comment naming the checklist item. A blank cell in the workbook means the tool did not decide it.</p>
+  <p class="mut">Formatting with one right answer (page setup, fonts, sizes, digits, heading numbers, captions, bullets, colour,
+  footers, file names) is fixed in these copies; the first comment in each file lists the changes. What needs a person is
+  highlighted with a comment: red = fails the checklist, turquoise = model suggestion. A blank cell in the workbook means the tool did not decide it.</p>
 {% endif %}</div>
 <form method="post" action="{{ url_for('delete_job', job_id=job.id) }}"><button class="link" type="submit">Delete this review and its files</button></form></div>
 {% if job.state in ('queued','running') %}<script>

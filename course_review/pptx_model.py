@@ -74,6 +74,9 @@ def _theme_color_map(prs):
     return out
 
 
+REVIEW_BOX = "Course Review notes"
+
+
 def parse_pptx(path) -> PptxInfo:
     prs = Presentation(path)
     info = PptxInfo(path=str(path), width_in=Emu(prs.slide_width).inches, height_in=Emu(prs.slide_height).inches,
@@ -89,6 +92,8 @@ def parse_pptx(path) -> PptxInfo:
 
     def walk_shapes(shapes, idx):
         for sh in shapes:
+            if sh.name == REVIEW_BOX:
+                continue                      # the Course Review's own notes on a marked-up copy
             if sh.shape_type is not None and getattr(sh, "shapes", None) is not None and sh.shape_type == 6:  # group
                 walk_shapes(sh.shapes, idx)
                 continue
@@ -157,6 +162,8 @@ def parse_pptx(path) -> PptxInfo:
 
         def visit(shapes):
             for sh in shapes:
+                if sh.name == REVIEW_BOX:
+                    continue
                 if getattr(sh, "shapes", None) is not None and sh.shape_type == 6:
                     visit(sh.shapes)
                     continue
@@ -185,6 +192,18 @@ def parse_pptx(path) -> PptxInfo:
             kind = ph.get("type") if ph is not None else None
             if kind in ("ftr", "sldNum", "dt"):
                 info.footers.append((i, kind, sh.text_frame.text.strip() if sh.has_text_frame else ""))
+        # a text box along the bottom edge also serves as a footer (decks exported without footer placeholders)
+        for sh in slide.shapes:
+            if sh.name == REVIEW_BOX or not getattr(sh, "has_text_frame", False) or sh.top is None or sh.height is None:
+                continue
+            if sh.top >= prs.slide_height * 0.88 and sh.text_frame.text.strip():
+                t = sh.text_frame.text.strip()
+                if sh._element.find(f".//{{{A}}}fld[@type='slidenum']") is not None:
+                    info.footers.append((i, "sldNum", t))
+                if re.search(r"\d{4}-\d{2}-\d{2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}", t):
+                    info.footers.append((i, "dt", t))
+                if re.search(r"v\s?\d+(?:\.\d+)*", t, re.I):
+                    info.footers.append((i, "ftr", t))
         walk_shapes(slide.shapes, i)
         collect_text(slide, i)
         if slide.has_notes_slide:

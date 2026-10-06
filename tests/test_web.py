@@ -52,7 +52,7 @@ def test_upload_runs_a_review_and_serves_the_results(app, tmp_path):
     assert json.loads(c.get(f"/jobs/{job}/files/review.json").data)["findings"]
     z = c.get(f"/jobs/{job}/files/Marked-up-documents.zip")
     assert z.status_code == 200 and "attachment" in z.headers["Content-Disposition"] and z.data[:2] == b"PK"
-    assert b"Download marked-up documents" in page.data
+    assert b"Download fixed documents" in page.data
 
 
 def test_downloads_work_with_relative_folders_as_serve_uses_them(tmp_path, monkeypatch):
