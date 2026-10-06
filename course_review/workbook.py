@@ -85,7 +85,7 @@ def _copy_row_style(ws, src_row, dst_row, max_col):
         ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
 
 
-def fill_workbook(template_path, out_path, grid, subject_cells, summary_rows, meta):
+def fill_workbook(template_path, out_path, grid, subject_cells, summary_rows, meta, slo_rows=None):
     """grid: {sheet: [ {label, cells: {code: 'pass'|'fail'|'na'|None}, note} ]}
     subject_cells: {code: (status|None, note)}
     summary_rows: list of tuples for the 'Review Summary' sheet."""
@@ -164,4 +164,18 @@ def fill_workbook(template_path, out_path, grid, subject_cells, summary_rows, me
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
         for c in row:
             c.alignment = openpyxl.styles.Alignment(wrap_text=True, vertical="top")
+    if slo_rows:
+        if "SLO Coverage" in wb.sheetnames:
+            del wb["SLO Coverage"]
+        cs = wb.create_sheet("SLO Coverage", 3)
+        cs.append(["Chapter", "Lesson", "SLO", "SLO text", "Bloom", "Pop Quiz", "Chapter Exam", "Worksheet", "Data Bank", "Total"])
+        for c in cs[1]:
+            c.font = openpyxl.styles.Font(bold=True)
+        for r in slo_rows:
+            cs.append([r["chapter"], r["lesson"], r["slo"], r["text"], r["bloom"], r["pop_quiz"], r["chapter_exam"],
+                       r["worksheet"], r["data_bank"], r["total"]])
+        cs.column_dimensions["D"].width = 80
+        cs.freeze_panes = "A2"
+        cs.append([])
+        cs.append(["Counts are questions carrying an explicit SLO tag. Zero everywhere means no tag was found, not necessarily that the SLO is untested."])
     wb.save(out_path)

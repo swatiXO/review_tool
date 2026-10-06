@@ -44,7 +44,7 @@ def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name, mo
     }
     subject_cells = {c: (s, n) for c, (s, n, _) in res.subject.items()}
     xlsx_path = out / "Course-Review-Checklist-filled.xlsx"
-    workbook.fill_workbook(checklist_path, xlsx_path, res.grid, subject_cells, _summary_rows(rules), meta)
+    workbook.fill_workbook(checklist_path, xlsx_path, res.grid, subject_cells, _summary_rows(rules), meta, slo_rows=res.slo_map)
 
     data = {
         "meta": meta,
@@ -52,6 +52,7 @@ def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name, mo
         "subject_level": {c: {"status": s, "note": n, "documents": [f.to_dict() for f in fs]} for c, (s, n, fs) in res.subject.items()},
         "findings": [f.to_dict() for f in res.findings],
         "model_calls": res.model_stats,
+        "slo_coverage": res.slo_map,
         "automation": {c: {"level": AUTOMATION.get(c, ("no", ""))[0], "how": AUTOMATION.get(c, ("no", ""))[1]} for c in rules},
     }
     (out / "review.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf8")
@@ -115,6 +116,16 @@ def _html(pkg, res, rules, layout, meta):
                 txt, cls = {"pass": ("Pass", "pass"), "fail": ("Fail", "fail"), "na": ("N/A", "na"), None: ("·", "mut")}[v]
                 tds.append(f"<td class='cell {cls}'>{txt}")
             parts.append(f"<tr><td>{e(row['label'])}{''.join(tds)}<td>{e(row['note'])}</tr>")
+        parts.append("</table></div></section>")
+
+    if res.slo_map:
+        parts.append("<section><h2>SLO coverage</h2><p class=mut>Counts are questions that carry an explicit SLO tag. "
+                     "Zero everywhere means no tag was found, not necessarily that the SLO is untested.</p>"
+                     "<div class=scroll><table><tr><th>Lesson<th>SLO<th>Text<th>Pop Quiz<th>Chapter Exam<th>Worksheet<th>Data Bank</tr>")
+        for r in res.slo_map:
+            cls = "fail" if r["total"] == 0 else "pass"
+            parts.append(f"<tr><td>Ch{r['chapter']} L{r['lesson']}<td>{r['slo']}<td>{e(r['text'][:110])}"
+                         f"<td class={cls}>{r['pop_quiz']}<td class={cls}>{r['chapter_exam']}<td class={cls}>{r['worksheet']}<td class={cls}>{r['data_bank']}</tr>")
         parts.append("</table></div></section>")
 
     # inventory

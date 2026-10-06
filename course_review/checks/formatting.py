@@ -497,7 +497,58 @@ def we25(ctx, doc, info):
                   evidence=["The document name in the footer was not compared with the real name."])
 
 
-DOCX_CHECKS = {"WE1": we1, "WE2": we2, "WE3": we3, "WE4": we4, "WE6": we6, "WE7": we7, "WE8": we8, "WE10": we10,
+_APA = re.compile(r"\((?:[A-Z][A-Za-z\-']+)(?:\s+(?:&|and)\s+[A-Z][A-Za-z\-']+|\s+et al\.)?,\s+(?:\d{4}[a-z]?|n\.d\.)\)")
+_NOT_APA = [
+    (re.compile(r"\[\d+(?:\s*[,–-]\s*\d+)*\]"), "numbered citation like [1]"),
+    (re.compile(r"\((?:[A-Z][A-Za-z\-']+)(?:\s+(?:&|and)\s+[A-Z][A-Za-z\-']+|\s+et al\.)?\s+\d{4}[a-z]?\)"), "(Author Year) without the comma"),
+]
+
+
+def _citations(info):
+    good, bad = [], []
+    for p in info.paras:
+        t = p.text
+        good += _APA.findall(t)
+        for rx, why in _NOT_APA:
+            for m in rx.findall(t):
+                bad.append(f"{m} ({why})")
+    return good, bad
+
+
+def we21(ctx, doc, info: DocxInfo):
+    good, bad = _citations(info)
+    if not good and not bad:
+        return result("WE21", NA, "No outside-research citations found (Quran and Hadith references are not APA citations)")
+    if bad:
+        return result("WE21", FAIL, f"{len(bad)} citation(s) are not (Author, Year)", bad[:6])
+    return result("WE21", PASS, f"{len(good)} in-text citation(s), all (Author, Year)")
+
+
+def we22(ctx, doc, info: DocxInfo):
+    labels = [normalize(l).lower() for l in ctx.profile["vocab"]["reference_list_labels"]]
+    head = next((p for p in info.paras if not p.in_table and len(p.text.strip()) <= 40
+                 and normalize(p.text).lower().strip(" :") in labels), None)
+    good, bad = _citations(info)
+    if head is None:
+        if good or bad:
+            return result("WE22", FAIL, "The document cites outside research but has no reference list")
+        return result("WE22", NA, "No outside-research citations, so no reference list is needed")
+    entries = [p for p in info.paras if p.idx > head.idx and p.text.strip() and not p.in_table]
+    if not entries:
+        return result("WE22", FAIL, "The reference list heading has no entries")
+    ev = []
+    keys = [normalize(p.text).lower() for p in entries]
+    if keys != sorted(keys):
+        ev.append("entries are not in alphabetical order")
+    no_hang = [p for p in entries if p.hanging <= 0]
+    if no_hang:
+        ev.append(f"{len(no_hang)} of {len(entries)} entries have no hanging indent")
+    if ev:
+        return result("WE22", FAIL, "; ".join(ev), ev)
+    return result("WE22", PASS, f"{len(entries)} references, alphabetical, with a hanging indent")
+
+
+DOCX_CHECKS = {"WE21": we21, "WE22": we22, "WE1": we1, "WE2": we2, "WE3": we3, "WE4": we4, "WE6": we6, "WE7": we7, "WE8": we8, "WE10": we10,
                "WE11": we11, "WE12": we12, "WE13": we13, "WE15": we15, "WE16": we16, "WE17": we17, "WE18": we18,
                "WE19": we19, "WE20": we20, "WE23": we23, "WE25": we25}
 PPTX_CHECKS = {"WE1": we1, "WE2": we2, "WE3": we3, "WE5": we5, "WE6": we6, "WE7": we7, "WE10": we10,

@@ -28,6 +28,18 @@ class SlideRun:
 
 
 @dataclass
+class SlideText:
+    index: int
+    title: str
+    texts: list              # text of every text box and table row, in shape order
+    notes: str               # speaker notes
+
+    @property
+    def body(self) -> str:
+        return "\n".join(self.texts)
+
+
+@dataclass
 class PptxInfo:
     path: str
     width_in: float = 0
@@ -40,6 +52,7 @@ class PptxInfo:
     language: Optional[str] = None
     char_count: int = 0
     notes_chars: int = 0
+    slides_text: list = field(default_factory=list)
 
 
 def _theme_color_map(prs):
@@ -138,8 +151,36 @@ def parse_pptx(path) -> PptxInfo:
                 ii.slide = idx
                 info.images.append(ii)
 
+    def collect_text(slide, idx):
+        texts = []
+
+        def visit(shapes):
+            for sh in shapes:
+                if getattr(sh, "shapes", None) is not None and sh.shape_type == 6:
+                    visit(sh.shapes)
+                    continue
+                if sh.has_text_frame and sh.text_frame.text.strip():
+                    texts.append(sh.text_frame.text.strip())
+                if getattr(sh, "has_table", False) and sh.has_table:
+                    for row in sh.table.rows:
+                        cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                        if cells:
+                            texts.append(" | ".join(cells))
+        visit(slide.shapes)
+        title = ""
+        try:
+            if slide.shapes.title is not None and slide.shapes.title.text_frame.text.strip():
+                title = slide.shapes.title.text_frame.text.strip()
+        except Exception:
+            pass
+        if not title and texts:
+            title = texts[0].split("\n")[0]
+        notes = slide.notes_slide.notes_text_frame.text.strip() if slide.has_notes_slide else ""
+        info.slides_text.append(SlideText(idx, title, texts, notes))
+
     for i, slide in enumerate(prs.slides, start=1):
         walk_shapes(slide.shapes, i)
+        collect_text(slide, i)
         if slide.has_notes_slide:
             info.notes_chars += len(slide.notes_slide.notes_text_frame.text or "")
 

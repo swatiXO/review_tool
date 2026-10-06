@@ -58,6 +58,9 @@ vocab:
     10: ["دہم", "tenth", "ten"]
   variant_letters: {"الف": "A", "ب": "B", "ج": "C", "د": "D"}
   question_region_end_labels: ["اساتذہ", "Teacher", "Facilitator", "رہنمائے", "تشخیصی رہنمائی", "Answer Key", "Marking guide", "جوابات", "Guidance"]
+  facilitator_note_labels: ["Facilitator Notes", "Facilitator Note", "Facilitator tip", "Teacher note",
+                            "مقرر کے لیے نوٹ", "مقرر کے لیے مشورہ"]
+  reference_list_labels: ["References", "Reference List", "Bibliography", "حوالہ جات"]
   slo_tag_patterns: ['\bSLO\b', 'حاصلات? ?تعلیم', '[A-Z]-\d{2}-[A-Z]-\d{2}']
   lesson_plan_location_labels: ["Lesson Plan Location"]      # add Urdu wording here when known
   feedback_labels: ["Correct feedback", "Incorrect feedback"] # add Urdu wording here when known

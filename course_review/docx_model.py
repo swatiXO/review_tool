@@ -86,6 +86,7 @@ class ParaInfo:
     shading: Optional[str]
     all_bold: bool
     in_toc: bool = False
+    hanging: int = 0          # hanging indent in twips (0 = none)
 
 
 @dataclass
@@ -454,6 +455,13 @@ def parse_docx(path) -> DocxInfo:
                 return ("points", line / 20.0)
         return ("default", 1.0)
 
+    def hanging_indent(p_el):
+        for ppr in res.ppr_chain(p_el):
+            ind = ppr.find(qn("w:ind"))
+            if ind is not None and (ind.get(qn("w:hanging")) is not None or ind.get(qn("w:left")) is not None):
+                return int(ind.get(qn("w:hanging")) or 0)
+        return 0
+
     def para_info(p_el, in_table, table_idx, row_idx):
         runs = []
         for r_el in p_el.iter(qn("w:r")):
@@ -501,7 +509,7 @@ def parse_docx(path) -> DocxInfo:
             is_title=(low == "title"), bidi=bidi, runs=runs, in_table=in_table, table_idx=table_idx,
             row_idx=row_idx, num_label=num_label, list_kind=list_kind, line_spacing=line_spacing(p_el),
             images=_para_images(doc, p_el), shading=shd, all_bold=all_bold,
-            in_toc=low.startswith("toc") or low == "table of contents")
+            in_toc=low.startswith("toc") or low == "table of contents", hanging=hanging_indent(p_el))
 
     def walk(container, in_toc_sdt=False):
         for child in container:

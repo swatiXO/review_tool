@@ -205,16 +205,28 @@ def _tag_check(ctx, code, qs, info, key=None, chapter=None, doc=None):
     return result(code, PASS, "Every question is SLO-tagged", lesson=key, chapter=chapter, doc=doc)
 
 
+def get_questions(ctx, doc, info):
+    """(questions, model_summary, why_model_did_not_help) for a question document, parsed once.
+    The rule-based parser goes first; the model is asked only when the rules find nothing
+    or cannot trust the numbering."""
+    cache = ctx.__dict__.setdefault("_qcache", {})
+    if id(info) not in cache:
+        qs = parse_questions(info, ctx.profile)
+        summary = why_not = ""
+        if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
+            recovered, summary = recover_questions(info, ctx.model, doc)
+            if recovered:
+                qs = recovered
+            else:
+                why_not = summary
+        cache[id(info)] = (info, qs, summary, why_not)   # holding info keeps its id from being reused
+    return cache[id(info)][1:]
+
+
 def exam_checks(ctx, doc, info, doc_type):
     """CE1/CE4 on a per-lesson Chapter Exam; WS1/WS2/WS3/WS6 on a per-chapter Worksheet."""
-    qs = parse_questions(info, ctx.profile)
-    out, summary, why_not = [], "", ""
-    if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
-        recovered, summary = recover_questions(info, ctx.model, doc)
-        if recovered:
-            qs = recovered
-        else:
-            why_not = summary
+    qs, summary, why_not = get_questions(ctx, doc, info)
+    out = []
     if doc_type == "chapter_exam":
         out.append(_count_check("CE1", qs, 6, 8, key=doc.key, doc=doc.rel))
         out.append(_tag_check(ctx, "CE4", qs, info, key=doc.key, doc=doc.rel))

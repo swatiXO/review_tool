@@ -8,7 +8,7 @@ up as 'not automated' in the summary.
 import re
 from collections import Counter, defaultdict
 
-from .checks import assessments, formatting, lessonplan
+from .checks import assessments, coverage, formatting, lessonplan, slides
 from .checks.common import result
 from .checks.registry import AUTOMATION
 from .docx_model import parse_docx
@@ -107,6 +107,8 @@ class Results:
         self.grid = {}             # sheet -> [rows]
         self.inventory = {}
         self.errors = {}
+        self.slo_map = []
+        self.model_stats = []
 
 
 def run(pkg, profile, rules, layout, model=None):
@@ -129,6 +131,11 @@ def run(pkg, profile, rules, layout, model=None):
             f.lesson = d.key if d.scope == "lesson" and d.chapter is not None else None
             F.append(f)
             doc_findings[code].append(f)
+        if d.doc_type == "facilitator_guide" and d.ext == "pptx":
+            for code, fn in slides.DOC_CHECKS.items():
+                f = fn(ctx, d, info)
+                f.doc, f.lesson = d.rel, d.key
+                F.append(f)
         if d.doc_type == "lesson_plan" and d.ext == "docx":
             for code, fn in lessonplan.DOC_CHECKS.items():
                 f = fn(ctx, d, info)
@@ -152,6 +159,12 @@ def run(pkg, profile, rules, layout, model=None):
     dbs = assessments.dbs1(ctx, bank_items)
     F.append(dbs)
     doc_findings["DBS1"].append(dbs)
+
+    cov_findings, res.slo_map = coverage.coverage_findings(ctx)
+    F.extend(cov_findings)
+    for f in cov_findings:
+        if f.code in ("ST1", "ST2"):
+            doc_findings[f.code].append(f)
 
     # 3. missing artifacts per lesson / chapter
     lesson_keys = sorted({d.key for d in pkg.docs if d.scope == "lesson" and d.chapter is not None}, key=lambda k: k.sort_key())
@@ -212,14 +225,18 @@ def run(pkg, profile, rules, layout, model=None):
         ok = [f for f in fs if f.status == PASS]
         na = [f for f in fs if f.status == NA]
         rev = [f for f in fs if f.status == REVIEW]
+        package_level = all(f.doc is None for f in fs)   # a rule about the whole package, not one document
         if fails:
-            ex = "; ".join(f"{f.doc.split('/')[-1]}: {f.message}" for f in fails[:2])
-            note = f"{len(fails)} of {len(fs)} documents fail. {ex}"
+            if package_level:
+                note = fails[0].message
+            else:
+                ex = "; ".join(f"{(f.doc or 'package').split('/')[-1]}: {f.message}" for f in fails[:2])
+                note = f"{len(fails)} of {len(fs)} documents fail. {ex}"
             res.subject[code] = ("fail", note, fs)
         elif len(na) == len(fs):
             res.subject[code] = ("na", fs[0].message, fs)
         elif not rev and all(not f.partial for f in ok):
-            res.subject[code] = ("pass", f"All {len(ok)} applicable documents pass", fs)
+            res.subject[code] = ("pass", ok[0].message if package_level else f"All {len(ok)} applicable documents pass", fs)
         else:
             why = rev[0].message if rev else (ok[0].evidence[0] if ok and ok[0].evidence else "partly checked")
             res.subject[code] = (None, f"No failures in {len(fs)} documents; reviewer to confirm: {why}", fs)
