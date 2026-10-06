@@ -52,6 +52,15 @@ def test_upload_runs_a_review_and_serves_the_results(app, tmp_path):
     assert json.loads(c.get(f"/jobs/{job}/files/review.json").data)["findings"]
 
 
+def test_downloads_work_with_relative_folders_as_serve_uses_them(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    a = create_app(jobs_dir="web_jobs", checklist=checklist(tmp_path), books_dir="book_indexes", executor=SyncExecutor())
+    c = a.test_client()
+    job = upload(c, zip_bytes(tmp_path)).headers["Location"].rsplit("/", 1)[-1]
+    for name in ("Course-Review-Checklist-filled.xlsx", "report.html", "review.json"):
+        assert c.get(f"/jobs/{job}/files/{name}").status_code == 200, name
+
+
 def test_the_uploaded_zip_is_not_kept(app, tmp_path):
     c = app.test_client()
     job = upload(c, zip_bytes(tmp_path)).headers["Location"].rsplit("/", 1)[-1]

@@ -130,9 +130,9 @@ def _write_meta(job_dir: Path, meta):
 def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", executor=None, max_upload_mb=500, cache_dir=None):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = max_upload_mb * 1024 * 1024
-    jobs = Path(jobs_dir)
+    jobs = Path(jobs_dir).resolve()      # absolute: Flask resolves relative download folders against the package, not the cwd
     jobs.mkdir(parents=True, exist_ok=True)
-    books = Path(books_dir)
+    books = Path(books_dir).resolve()
     cache_dir = cache_dir or str(jobs / ".model_cache")
     pool = executor or ThreadPoolExecutor(max_workers=1)     # one review at a time: it is CPU heavy
     lock = threading.Lock()
