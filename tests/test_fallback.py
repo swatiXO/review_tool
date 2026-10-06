@@ -265,3 +265,26 @@ def test_make_model_refuses_to_run_silently_without_a_server():
         cli.make_model("suggest", url="http://127.0.0.1:1", model="m")
     assert "not usable" in str(e.value)
     assert cli.make_model("off") is None
+
+
+def test_chunks_overlap_so_a_boundary_question_is_seen_whole():
+    items = [(i, "word " * 60) for i in range(30)]
+    chunks = fallback.chunks_of(items, max_chars=1500)
+    assert len(chunks) > 2
+    for prev, nxt in zip(chunks, chunks[1:]):
+        assert nxt[:2] == prev[-fallback.CHUNK_OVERLAP:] or nxt[0] in prev       # the next chunk starts with the previous chunk's tail
+    assert {i for c in chunks for i, _ in c} == set(range(30))                  # nothing is dropped
+
+
+def test_a_quote_from_the_line_after_a_label_is_accepted_but_not_from_further_away(tmp_path):
+    d = new_doc()
+    add(d, "Question 3 (analysis)")                       # label line
+    add(d, "Explain why the Muslims won the battle of Badr in detail.")   # the wording
+    add(d, "Some unrelated paragraph that is far away from the label.")
+    info = parse_docx(save(d, tmp_path))
+    chunk = fallback.listing(info)
+    label = chunk[0][0]
+    ok, bad = verify([{"para": label, "quote": "Explain why the Muslims won"}], chunk)
+    assert list(ok) == [label] and bad == 0
+    ok, bad = verify([{"para": label, "quote": "unrelated paragraph that is far"}], chunk)
+    assert not ok and bad == 1

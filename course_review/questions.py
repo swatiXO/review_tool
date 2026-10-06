@@ -97,6 +97,35 @@ def classify_type(block: str, option_count: int) -> str:
     return "open"
 
 
+ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+
+
+def question_number(text: str):
+    """An int from digits ('12') or a roman numeral ('xii'); None if it is neither."""
+    t = to_western_digits(text.strip())
+    if t.isdigit():
+        return int(t)
+    t = t.lower()
+    if t and all(ch in ROMAN for ch in t):
+        total = 0
+        for i, ch in enumerate(t):
+            v = ROMAN[ch]
+            total += -v if i + 1 < len(t) and ROMAN[t[i + 1]] > v else v
+        return total if 0 < total < 200 else None
+    return None
+
+
+def compile_extra_patterns(profile):
+    out = []
+    for entry in profile["vocab"].get("extra_question_patterns", []) or []:
+        pattern = entry["pattern"] if isinstance(entry, dict) else entry
+        try:
+            out.append(re.compile(pattern, re.I))
+        except re.error:
+            continue
+    return out
+
+
 def parse_questions(info, profile, lo: int = 0, hi: Optional[int] = None):
     """Questions among paragraphs with index in [lo, hi). Table paragraphs only count
     when they carry an explicit question label."""
@@ -104,6 +133,7 @@ def parse_questions(info, profile, lo: int = 0, hi: Optional[int] = None):
     qre_lab = question_regex(profile, labelled=True)
     qre_tab = table_question_regex(profile)
     lre = lesson_heading_regex(profile)
+    extra = compile_extra_patterns(profile)
     end_labels = [normalize(x).lower() for x in profile["vocab"].get("question_region_end_labels", [])]
     paras = [p for p in info.paras if p.idx >= lo and (hi is None or p.idx < hi)]
     starts, seen_q = [], False
@@ -129,9 +159,16 @@ def parse_questions(info, profile, lo: int = 0, hi: Optional[int] = None):
             labelled = bool(m)
         if m is None and not p.in_table:
             m = qre.match(t) or QUESTION_PAREN.match(t) or QUESTION_SHORT.match(t)
+        if m is None:
+            for rx in extra:                      # formats learned with `learn-format`
+                m = rx.match(t)
+                if m:
+                    break
         if m and not OPTION_START.match(t):
-            starts.append((p.idx, int(m.group(1)), labelled))
-            seen_q = True
+            number = question_number(m.group(1))
+            if number is not None:
+                starts.append((p.idx, number, labelled))
+                seen_q = True
     # header lines such as '31: lesson title' before the first labelled question are not questions
     first_lab = next((st[0] for st in starts if len(st) == 3 and st[2]), None)
     if first_lab is not None:

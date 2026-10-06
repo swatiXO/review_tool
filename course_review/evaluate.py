@@ -51,11 +51,12 @@ def run(zip_path, model, limit=10, json_path=None, labels_path=None):
             ex = fallback.extract(info, model.client, cache=None)
             got = set(ex.starts)
             if kind == "silver":
-                want = {q.start for q in truth}
-                tp = len(got & want)
-                prec = tp / len(got) if got else 0.0
-                rec = tp / len(want) if want else 0.0
-                n_truth = len(want)
+                # a model start is right if it falls inside a real question's block; each block counts once
+                hit_blocks = {i for i, q in enumerate(truth) if any(q.start <= s < q.end for s in got)}
+                good_starts = {s for s in got if any(q.start <= s < q.end for q in truth)}
+                prec = len(good_starts) / len(got) if got else 0.0
+                rec = len(hit_blocks) / len(truth) if truth else 0.0
+                n_truth = len(truth)
             else:
                 n_truth, prec, rec = truth, None, None
             rows.append({"doc": d.rel, "kind": kind, "truth": n_truth, "model": len(got), "precision": prec,

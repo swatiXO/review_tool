@@ -82,7 +82,10 @@ def lp1(ctx, key, doc, secs, slos):
               'Is every numbered SLO fully covered somewhere in the Concept Building text? List the numbers of any SLO that is not '
               'fully covered in "uncovered_slos" (an empty list if all are covered).',
               extra_keys=("uncovered_slos",),
-              validate_extra=lambda e: isinstance(e.get("uncovered_slos"), list) and all(isinstance(n, int) and 1 <= n <= len(slos) for n in e["uncovered_slos"]))
+              validate_extra=lambda e: e.get("uncovered_slos") is None or (isinstance(e["uncovered_slos"], list)
+                                       and all(isinstance(n, int) and 1 <= n <= len(slos) for n in e["uncovered_slos"])))
+    if j.usable and j.verdict == "pass" and j.extra.get("uncovered_slos"):
+        j.usable, j.note = False, "the model said pass but also listed SLOs it found uncovered"
     f = suggestion("LP1", j, **where(key, doc))
     if j.usable and j.extra.get("uncovered_slos"):
         f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{n} ({slos[n - 1][:50]})" for n in j.extra["uncovered_slos"]))

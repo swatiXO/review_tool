@@ -15,8 +15,8 @@ from typing import Optional
 from .llm import LLMError
 from .textutil import normalize
 
-PROMPT_VERSION = "j1"
-MAX_MATERIAL_CHARS = 6000
+PROMPT_VERSION = "j2"
+MAX_MATERIAL_CHARS = 9000
 MIN_QUOTE_CHARS = 8
 
 SYSTEM = """You are a careful reviewer of school course material. You judge ONE checklist rule about
@@ -31,6 +31,8 @@ Rules for your answer:
   material does not let you decide. Prefer "unclear" to guessing.
 - Every "quote" must be copied exactly from the material (8 to 80 characters) and must be what your
   verdict rests on. For "fail", quote the passage that is wrong or the SLO / item that is not covered.
+- Material may contain the marker "[...cut]". It only means a long section was shortened to fit. Never treat a
+  cut as a flaw in the material, and never quote the marker.
 - Write the reason in English."""
 
 
@@ -53,24 +55,54 @@ class Judgement:
     cut: bool = False                  # the material was longer than the limit and was shortened
 
 
+def _fit(materials, budget):
+    """Texts shortened to fit the budget. Short materials stay whole; the budget left over is shared
+    among the long ones, so no section is cut to nothing just because it came last."""
+    texts = [m.text.strip() for m in materials]
+    share = [None] * len(texts)
+    remaining, open_idx = budget, [i for i, t in enumerate(texts)]
+    while open_idx:
+        fair = remaining // len(open_idx)
+        small = [i for i in open_idx if len(texts[i]) <= fair]
+        if not small:
+            for i in open_idx:
+                share[i] = fair
+            break
+        for i in small:
+            share[i] = len(texts[i])
+            remaining -= len(texts[i])
+        open_idx = [i for i in open_idx if i not in small]
+    out, cut = [], False
+    for t, n in zip(texts, share):
+        if len(t) > n:
+            t, cut = t[:n].rstrip() + " [...cut]", True
+        out.append(t)
+    return out, cut
+
+
 def _material_block(materials, budget=MAX_MATERIAL_CHARS):
-    parts, used, cut = [], 0, False
-    for m in materials:
-        room = max(budget - used, 0)
-        text = m.text.strip()
-        if len(text) > room:
-            text, cut = text[:room] + " [...cut]", True
-        parts.append(f"### {m.label}\n{text}")
-        used += len(text)
-    return "\n\n".join(parts), cut
+    texts, cut = _fit(materials, budget)
+    return "\n\n".join(f"### {m.label}\n{t}" for m, t in zip(materials, texts)), cut
+
+
+def _loose(text):
+    """Comparison form: letters and digits only, so quote marks, dashes and bullets do not matter."""
+    t = re.sub(r"[^\w\s]", " ", normalize(text))
+    return re.sub(r"\s+", " ", t).strip().lower()
+
+
+def _fragments(quote):
+    """A quote may skip words with '...'; each stretch between the gaps must be real text."""
+    parts = re.split(r"\.\.\.|\u2026|\[\.\.\.[^\]]*\]", quote)
+    return [f for f in (_loose(p) for p in parts) if len(f) >= MIN_QUOTE_CHARS]
 
 
 def verify_quotes(evidence, materials):
-    haystack = [normalize(m.text) for m in materials]
+    haystack = [_loose(m.text) for m in materials]
     ok, rejected = [], 0
     for item in evidence if isinstance(evidence, list) else []:
-        q = normalize(str(item.get("quote", ""))) if isinstance(item, dict) else ""
-        if len(q) >= MIN_QUOTE_CHARS and any(q in h for h in haystack):
+        frags = _fragments(str(item.get("quote", ""))) if isinstance(item, dict) else []
+        if frags and any(all(f in h for f in frags) for h in haystack):
             ok.append(str(item["quote"]).strip())
         else:
             rejected += 1

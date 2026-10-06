@@ -6,6 +6,7 @@
   python -m course_review.cli eval-model PACKAGE.zip --model-url https://abcd.ngrok-free.dev
 """
 import argparse
+import os
 import shutil
 import sys
 import tempfile
@@ -31,15 +32,19 @@ def make_model(mode, url=None, model=None, cache_dir=".course_review_cache", jud
     return fallback.ModelConfig(client=client, cache=fallback.Cache(cache_dir), mode=mode, judge=judge, codes=codes)
 
 
-def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None):
+def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None, progress=None):
     t0 = time.time()
     profile = ingest.load_profile(profile_path)
     rules, layout = workbook.load_rules(checklist)
     work = Path(tempfile.mkdtemp(prefix="course-review-"))
     try:
+        say = progress or (lambda *a: None)
+        say("Unpacking the zip", 0, 0)
         dest = ingest.safe_extract(zip_path, work)
+        say("Sorting the files", 0, 0)
         pkg = ingest.classify(ingest.find_root(dest), profile)
-        res = engine.run(pkg, profile, rules, layout, model=model, book=book)
+        res = engine.run(pkg, profile, rules, layout, model=model, book=book, progress=progress)
+        say("Writing the workbook and report", 0, 0)
         xlsx = report.write_outputs(pkg, res, rules, layout, checklist, out_dir, Path(zip_path).name, model=model)
     finally:
         if not keep:
@@ -81,6 +86,20 @@ def main(argv=None):
     b.add_argument("--lang", default="urd+eng", help="Tesseract languages")
     _model_args(b)
 
+    sv = sub.add_parser("serve", help="run the web page (upload a zip, download the results)")
+    sv.add_argument("--checklist", default=os.environ.get("COURSE_REVIEW_CHECKLIST"), help="default checklist workbook (or set COURSE_REVIEW_CHECKLIST)")
+    sv.add_argument("--host", default="127.0.0.1", help="127.0.0.1 keeps it on this computer (default)")
+    sv.add_argument("--port", type=int, default=8080)
+    sv.add_argument("--jobs-dir", default="web_jobs")
+    sv.add_argument("--books-dir", default="book_indexes", help="folder holding textbook indexes made with index-book")
+
+    lf = sub.add_parser("learn-format", help="learn how a document numbers its questions, once, then use it without a model")
+    lf.add_argument("document", help="a .docx whose questions the parser does not recognise")
+    lf.add_argument("--save", required=True, help="profile file to add the learned pattern to (created if missing)")
+    lf.add_argument("--pattern", help="give the pattern yourself instead of asking the model")
+    lf.add_argument("--yes", action="store_true", help="save without asking for confirmation")
+    _model_args(lf)
+
     c = sub.add_parser("check-model", help="check the model server is reachable and has the model")
     _model_args(c)
 
@@ -92,6 +111,38 @@ def main(argv=None):
     _model_args(e)
 
     a = ap.parse_args(argv)
+
+    if a.cmd == "serve":
+        from . import web
+        web.serve(a.checklist, a.host, a.port, a.jobs_dir, a.books_dir)
+        return
+
+    if a.cmd == "learn-format":
+        from . import formats
+        from .docx_model import parse_docx
+        info = parse_docx(a.document)
+        profile = ingest.load_profile(a.save if Path(a.save).exists() else None)
+        try:
+            if a.pattern:
+                _, matches, problems = formats.validate(a.pattern, info)
+                found = {"pattern": a.pattern, "explanation": "given on the command line", "matches": matches, "problems": problems}
+            else:
+                model = make_model("suggest", a.model_url, a.model, a.cache_dir)
+                found = formats.propose(model.client, info)
+        except formats.FormatError as e:
+            raise SystemExit(f"No usable pattern: {e}")
+        print(f"Pattern: {found['pattern']}\n  {found['explanation']}\nIt matches {len(found['matches'])} paragraph(s):")
+        for idx, num, text in found["matches"][:8]:
+            print(f"  question {num}: {text[:70]}")
+        if found["problems"]:
+            raise SystemExit("Not saved. Problems: " + "; ".join(found["problems"]))
+        ok = a.yes or input("Save this pattern to the profile? [y/N] ").strip().lower().startswith("y")
+        if ok:
+            added = formats.save_pattern(a.save, found["pattern"], note=Path(a.document).name)
+            print(("Saved to " if added else "Already in ") + a.save + ". Use it with: review ... --profile " + a.save)
+        else:
+            print("Not saved.")
+        return
 
     if a.cmd == "index-book":
         from . import book as bk

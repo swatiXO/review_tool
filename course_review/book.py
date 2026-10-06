@@ -104,9 +104,22 @@ VLM_PROMPT = ("Transcribe all the text on this book page exactly as written, in 
               "The page is in Urdu. Do not translate, summarise or add anything. Output only the text.")
 
 
-def ocr_vlm(png, client):
-    with open(png, "rb") as f:
-        image = base64.b64encode(f.read()).decode("ascii")
+def _downscaled_png(png, max_side):
+    """PNG bytes with the longest side at most max_side pixels. Vision models cost roughly in
+    proportion to the pixels they see, so a full 200 dpi page is far slower than it needs to be."""
+    from io import BytesIO
+    from PIL import Image
+    with Image.open(png) as im:
+        im = im.convert("RGB")
+        if max(im.size) > max_side:
+            im.thumbnail((max_side, max_side))
+        buf = BytesIO()
+        im.save(buf, "PNG")
+        return buf.getvalue()
+
+
+def ocr_vlm(png, client, max_side=1280):
+    image = base64.b64encode(_downscaled_png(png, max_side)).decode("ascii")
     return client.chat_vision(VLM_PROMPT, image)
 
 

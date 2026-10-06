@@ -16,9 +16,29 @@ from .models import DocRef, LessonKey, Package
 DEFAULT_PROFILE = Path(__file__).with_name("profile.default.yaml")
 
 
+def _merge(base, over):
+    """Overlay `over` on `base`: dicts merge key by key, other values (lists included) are replaced,
+    except extra_question_patterns, which accumulate."""
+    out = dict(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            out[k] = _merge(base[k], v)
+        elif k == "extra_question_patterns" and isinstance(base.get(k), list):
+            out[k] = list(base[k]) + [x for x in v if x not in base[k]]
+        else:
+            out[k] = v
+    return out
+
+
 def load_profile(path=None) -> dict:
-    with open(path or DEFAULT_PROFILE, encoding="utf8") as f:
-        return yaml.safe_load(f)
+    """The built-in profile, with the file at `path` (if any) laid over it. A profile file only
+    needs the settings it changes, for example a few learned question patterns."""
+    with open(DEFAULT_PROFILE, encoding="utf8") as f:
+        profile = yaml.safe_load(f)
+    if path:
+        with open(path, encoding="utf8") as f:
+            profile = _merge(profile, yaml.safe_load(f) or {})
+    return profile
 
 
 class UnsafeArchive(Exception):

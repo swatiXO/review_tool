@@ -18,8 +18,9 @@ from .llm import LLMError
 from .questions import OPTION_START, questions_from_starts
 from .textutil import normalize
 
-PROMPT_VERSION = "q1"
-MAX_CHUNK_CHARS = 3500
+PROMPT_VERSION = "q2"
+MAX_CHUNK_CHARS = 7000
+CHUNK_OVERLAP = 2          # paragraphs repeated at the start of the next chunk so a question is never cut blind
 MAX_PARA_CHARS = 240
 MAX_REJECTED_SHARE = 0.3
 
@@ -29,8 +30,11 @@ Find the paragraphs where a NEW QUESTION that the student must answer begins.
 
 Rules:
 - A question starts at the paragraph that carries its number or its wording, not at its answer options.
-- Answer options (a, b, c, d / A, B, C, D), hints, sample answers, instructions, headings and teacher
-  guidance are NOT questions.
+- Answer options (a, b, c, d / A, B, C, D), hints, sample answers, model answers, instructions, headings and
+  teacher guidance are NOT questions. Lines that start with words such as "Hint", "Sample answer", "Model answer",
+  "اشارہ", "نمونہ جواب" or "مثالی جواب" belong to the question above them.
+- A question may sit inside a table. If it begins with a label line such as "Question 2  Type: analytical", mark that
+  label line; otherwise mark the line with the question wording. Mark exactly one paragraph per question.
 - Sub-parts of one question (a, b, c, or i, ii, iii) belong to that question; they are not new questions.
 - If a numbered instruction such as "Question 2: answer the following" is followed by several
   separate unnumbered questions, list each separate question, not the instruction.
@@ -120,6 +124,8 @@ def chunks_of(items, max_chars=MAX_CHUNK_CHARS):
         size += line_len
     if cur:
         chunks.append(cur)
+    for i in range(len(chunks) - 1, 0, -1):          # overlap, so a question at a boundary is seen whole
+        chunks[i] = chunks[i - 1][-CHUNK_OVERLAP:] + chunks[i]
     return chunks
 
 
@@ -131,6 +137,7 @@ def verify(proposals, chunk):
     """Keep only proposals whose paragraph exists in this chunk and whose quote appears in it.
     Returns (accepted: {idx: quote}, rejected_count)."""
     by_idx = {idx: normalize(t) for idx, t in chunk}
+    following = {chunk[i][0]: normalize(chunk[i + 1][1]) for i in range(len(chunk) - 1)}
     accepted, rejected = {}, 0
     for item in proposals:
         try:
@@ -140,7 +147,9 @@ def verify(proposals, chunk):
             rejected += 1
             continue
         text = by_idx.get(idx)
-        if text is None or len(quote) < 3 or quote not in text:
+        # Many exams put a label line ("Question 3 (analysis)") above the question wording. The model then marks the
+        # label but quotes the wording, so the quote may come from the paragraph itself or the very next one.
+        if text is None or len(quote) < 3 or not (quote in text or quote in following.get(idx, "")):
             rejected += 1
             continue
         if OPTION_START.match(text):   # an answer option is never a question start

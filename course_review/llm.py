@@ -27,13 +27,14 @@ def _strip_fences(text: str) -> str:
 
 
 class OllamaClient:
-    def __init__(self, url=None, model=None, timeout=900, num_ctx=8192, seed=7):
+    def __init__(self, url=None, model=None, timeout=900, num_ctx=None, seed=7):
         url = url or os.environ.get("OLLAMA_URL")
         if not url and os.environ.get("OLLAMA_HOST"):  # same variable the lesson generator uses
             url = "https://" + os.environ["OLLAMA_HOST"]
         self.url = (url or DEFAULT_URL).rstrip("/")
         self.model = model or os.environ.get("OLLAMA_MODEL") or DEFAULT_MODEL
-        self.timeout, self.num_ctx, self.seed = timeout, num_ctx, seed
+        self.timeout, self.seed = timeout, seed
+        self.num_ctx = num_ctx or int(os.environ.get("OLLAMA_NUM_CTX", "12288"))   # room for ~9000 characters of Urdu plus the answer
         self.calls = 0
         self.seconds = 0.0
 

@@ -112,7 +112,9 @@ class Results:
         self.model_stats = []
 
 
-def run(pkg, profile, rules, layout, model=None, book=None):
+def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
+    """progress(stage, done, total) is called as the run advances (used by the web page)."""
+    say = progress or (lambda *a: None)
     _collapse_lessonless_chapters(pkg)
     ctx = Context(pkg, profile, rules, model, book)
     res = Results()
@@ -121,7 +123,8 @@ def run(pkg, profile, rules, layout, model=None, book=None):
 
     # 1. per-document formatting + structure
     doc_findings = defaultdict(list)    # code -> [Finding]
-    for d in formatted:
+    for n, d in enumerate(formatted, 1):
+        say("Checking documents", n, len(formatted))
         info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
         if info is None:
             continue
@@ -148,6 +151,7 @@ def run(pkg, profile, rules, layout, model=None, book=None):
             doc_findings["WE14"].append(w14)
 
     # 2. question documents
+    say("Checking quizzes, exams and the Data Bank", 0, 0)
     F.extend(assessments.pop_quiz_checks(ctx))
     for d in pkg.docs:
         if d.superseded or d.ext != "docx" or d.doc_type not in ("chapter_exam", "worksheet"):
@@ -161,12 +165,15 @@ def run(pkg, profile, rules, layout, model=None, book=None):
     F.append(dbs)
     doc_findings["DBS1"].append(dbs)
 
+    say("Checking SLO coverage", 0, 0)
     cov_findings, res.slo_map = coverage.coverage_findings(ctx)
     F.extend(cov_findings)
     for f in cov_findings:
         if f.code in ("ST1", "ST2"):
             doc_findings[f.code].append(f)
     judgement.augment_coverage(ctx, F)
+    if model is not None and model.judge:
+        say("Asking the model about the content", 0, 0)
     F.extend(judgement.judgement_findings(ctx))
 
     # 3. missing artifacts per lesson / chapter
