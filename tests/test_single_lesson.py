@@ -32,7 +32,7 @@ def test_one_lesson_package_finds_its_pop_quiz_section(tmp_path):
     z = zip_dir(str(root), str(tmp_path / "one.zip"))
     out = tmp_path / "out"
     cli.review(z, str(checklist(tmp_path)), str(out))
-    found = {f["code"]: f for f in json.load(open(out / "review.json"))["findings"] if f["lesson"] == "Ch4-L2"}
+    found = {f["code"]: f for f in json.load(open(out / "review.json", encoding="utf-8"))["findings"] if f["lesson"] == "Ch4-L2"}
     assert found["PQ1"]["status"] == "pass" and "2 MCQ" in found["PQ1"]["message"]
 
 
@@ -48,7 +48,7 @@ def test_loose_lesson_files_without_folders_keep_their_lesson_and_no_chapter_exa
     z = zip_dir(str(root), str(tmp_path / "loose.zip"))
     out = tmp_path / "out"
     cli.review(z, str(checklist(tmp_path)), str(out))
-    r = json.load(open(out / "review.json"))
+    r = json.load(open(out / "review.json", encoding="utf-8"))
     assert [d["lesson"] for d in r["inventory"]["documents"]] == ["2"]
     ws1 = [f for f in r["findings"] if f["code"] == "WS1"]
     assert ws1 and all(f["status"] == "needs_review" for f in ws1)
