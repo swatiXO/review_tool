@@ -34,7 +34,9 @@ class OllamaClient:
         self.url = (url or DEFAULT_URL).rstrip("/")
         self.model = model or os.environ.get("OLLAMA_MODEL") or DEFAULT_MODEL
         self.timeout, self.seed = timeout, seed
-        self.num_ctx = num_ctx or int(os.environ.get("OLLAMA_NUM_CTX", "12288"))   # room for ~9000 characters of Urdu plus the answer
+        # 8192 tokens hold ~12000 characters of Urdu (measured 2.35 chars/token) plus the answer, and keep a 9B
+        # model fully on an 8 GB GPU; a larger context spilled part of it to the CPU.
+        self.num_ctx = num_ctx or int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
         self.calls = 0
         self.seconds = 0.0
 

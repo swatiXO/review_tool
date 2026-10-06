@@ -16,7 +16,16 @@ from .llm import LLMError
 from .textutil import normalize
 
 PROMPT_VERSION = "j2"
-MAX_MATERIAL_CHARS = 9000
+MAX_MATERIAL_CHARS = 12000       # more than this in one question and a small model's attention thins out
+CHARS_PER_TOKEN = 2.2            # measured 2.35 for Urdu lesson text on qwen3.5; English is higher, so this is safe
+RESERVED_TOKENS = 1800           # system prompt, question, answer
+
+
+def material_budget(model):
+    """Characters of document text that fit the model's context next to the prompt and the answer
+    (about 12000 at the default 8192 tokens). Longer text is read in parts, never cut silently."""
+    ctx = getattr(getattr(model, "client", None), "num_ctx", None) or 8192
+    return max(2500, min(MAX_MATERIAL_CHARS, int((ctx - RESERVED_TOKENS) * CHARS_PER_TOKEN)))
 MIN_QUOTE_CHARS = 8
 
 SYSTEM = """You are a careful reviewer of school course material. You judge ONE checklist rule about
@@ -111,8 +120,13 @@ def verify_quotes(evidence, materials):
 
 def judge(model, code, rule_text, materials, instruction, extra_keys=(), validate_extra=None):
     """Ask the model; returns a Judgement (usable only when the verdict is supported by a verified quote)."""
-    block, cut = _material_block(materials)
-    user = f"Rule {code}: {rule_text}\n\nWhat to decide: {instruction}\n\n{block}"
+    block, cut = _material_block(materials, material_budget(model))
+    shape = ""
+    if extra_keys:
+        # Small models drop keys that are only mentioned in the question; name them in the answer shape too.
+        keys = ", ".join(f'"{k}": ...' for k in extra_keys)
+        shape = f'\n\nAnswer with JSON of this shape: {{"verdict": ..., "reason": ..., "evidence": [{{"quote": ...}}], {keys}}}'
+    user = f"Rule {code}: {rule_text}\n\nWhat to decide: {instruction}{shape}\n\n{block}"
     key = hashlib.sha1("|".join([PROMPT_VERSION, model.client.name, code, user]).encode("utf8")).hexdigest()
     if model.cache is not None:
         hit = model.cache.get(key)

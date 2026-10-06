@@ -240,3 +240,39 @@ def test_page_specs_and_index_loading(tmp_path):
     (tmp_path / "pages" / "0005.txt").write_text("cube roots", encoding="utf8")
     assert sorted(BookIndex.load(tmp_path).pages) == [4, 5]
     assert tokens("Roots, عبادت!") == ["roots", "عبادت"]
+
+
+# ------------------------------------------------- long text read in parts
+class PartsJudge(_Base):
+    """Says each part covers the SLO whose keyword appears in it, quoting that line."""
+    num_ctx = 4096          # budget ~5000 characters, so the ~7600-character text needs two parts
+
+    def chat_json(self, system, user):
+        self.calls += 1
+        part = user.split("### Concept Building", 1)[1].split("\n", 1)[1]
+        covered = [n for n, w in ((1, "roots"), (2, "stems"), (3, "leaves")) if w in part]
+        line = next(l for l in part.splitlines() if any(w in l for w in ("roots", "stems", "leaves", "filler")))
+        return {"verdict": "pass" if covered else "unclear", "reason": "r", "evidence": [{"quote": line[:40]}],
+                "covered_slos": covered}
+
+
+def test_long_concept_building_is_read_in_parts_and_an_slo_counts_if_any_part_covers_it():
+    from course_review.checks.judgement import lp1, split_parts
+    slos = ["Name the roots", "Name the stems", "Name the leaves"]
+    filler = "\n".join(["filler sentence about plants that goes on for a while."] * 70)
+    cb = "Plant roots hold the soil.\n" + filler + "\nPlant stems carry water up.\n" + filler
+    ctx = make_ctx()
+    ctx.model = cfg(PartsJudge())
+    assert len(split_parts(cb, 3000)) > 1
+    f = lp1(ctx, None, None, {"concept_building": cb}, slos)
+    assert ctx.model.client.calls > 1
+    assert "Would be fail" in f.message and "3 not covered" in f.message      # leaves: in no part
+    assert any("3 (Name the leaves)" in e for e in f.evidence)
+
+
+def test_split_parts_keeps_all_text():
+    from course_review.checks.judgement import split_parts
+    text = "\n".join(f"paragraph {i} " + "x" * 300 for i in range(40)) + "\n" + "y" * 9000
+    parts = split_parts(text, 2500)
+    assert all(len(p) <= 2500 for p in parts)
+    assert "".join(parts).replace("\n", "") == text.replace("\n", "")

@@ -13,7 +13,7 @@ PQ5/WS4/WS5 coverage when questions carry no SLO tags (augment_coverage)
 """
 import re
 
-from ..judge import MAX_MATERIAL_CHARS, Material, cached_chat, judge, suggestion, verify_quotes
+from ..judge import Material, cached_chat, judge, material_budget, suggestion, verify_quotes
 from ..llm import LLMError
 from ..models import FAIL, PASS, REVIEW
 from ..slo import slos_for
@@ -74,35 +74,102 @@ def where(key, doc):
 
 
 # ------------------------------------------------------------------ the checks
+def split_parts(text, budget):
+    """Concept Building in parts that each fit the model's context, split between paragraphs.
+    Long lessons are sent in parts instead of being cut, so nothing is lost when the context is
+    lowered to keep the model on the GPU."""
+    parts, cur = [], ""
+    for para in text.split("\n"):
+        while len(para) > budget:                      # one paragraph longer than a whole part
+            parts.append(cur) if cur else None
+            cur, parts = "", parts + [para[:budget]]
+            para = para[budget:]
+        if cur and len(cur) + len(para) + 1 > budget:
+            parts.append(cur)
+            cur = ""
+        cur = f"{cur}\n{para}" if cur else para
+    if cur:
+        parts.append(cur)
+    return parts or [text]
+
+
+def _cb_parts(ctx, secs, slos):
+    """Concept Building split to fit next to the SLO list; one part when it fits."""
+    from ..judge import material_budget
+    room = material_budget(ctx.model) - len(numbered(slos)) - 200
+    return split_parts(secs["concept_building"], max(1500, room))
+
+
 def lp1(ctx, key, doc, secs, slos):
     if not slos or "concept_building" not in secs:
         return None
-    mats = [Material("SLOs (numbered)", numbered(slos)), Material("Concept Building", secs["concept_building"])]
-    j = judge(ctx.model, "LP1", ctx.rules["LP1"].text if "LP1" in ctx.rules else "Every stated SLO is fully covered in Concept Building", mats,
-              'Is every numbered SLO fully covered somewhere in the Concept Building text? List the numbers of any SLO that is not '
-              'fully covered in "uncovered_slos" (an empty list if all are covered).',
-              extra_keys=("uncovered_slos",),
-              validate_extra=lambda e: e.get("uncovered_slos") is None or (isinstance(e["uncovered_slos"], list)
-                                       and all(isinstance(n, int) and 1 <= n <= len(slos) for n in e["uncovered_slos"])))
-    if j.usable and j.verdict == "pass" and j.extra.get("uncovered_slos"):
-        j.usable, j.note = False, "the model said pass but also listed SLOs it found uncovered"
+    rule = ctx.rules["LP1"].text if "LP1" in ctx.rules else "Every stated SLO is fully covered in Concept Building"
+    parts = _cb_parts(ctx, secs, slos)
+    if len(parts) == 1:
+        mats = [Material("SLOs (numbered)", numbered(slos)), Material("Concept Building", parts[0])]
+        j = judge(ctx.model, "LP1", rule, mats,
+                  'Is every numbered SLO fully covered somewhere in the Concept Building text? List the numbers of any SLO that is not '
+                  'fully covered in "uncovered_slos" (an empty list if all are covered).',
+                  extra_keys=("uncovered_slos",),
+                  validate_extra=lambda e: e.get("uncovered_slos") is None or (isinstance(e["uncovered_slos"], list)
+                                           and all(isinstance(n, int) and 1 <= n <= len(slos) for n in e["uncovered_slos"])))
+        if j.usable and j.verdict == "pass" and j.extra.get("uncovered_slos"):
+            j.usable, j.note = False, "the model said pass but also listed SLOs it found uncovered"
+        f = suggestion("LP1", j, **where(key, doc))
+        if j.usable and j.extra.get("uncovered_slos"):
+            f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{n} ({slos[n - 1][:50]})" for n in j.extra["uncovered_slos"]))
+        return f
+    # Long Concept Building: ask, part by part, which SLOs that part covers; an SLO is covered if any part covers it.
+    from ..judge import Judgement
+    covered, quotes, notes, n = set(), [], [], len(slos)
+    for i, part in enumerate(parts, 1):
+        mats = [Material("SLOs (numbered)", numbered(slos)), Material(f"Concept Building, part {i} of {len(parts)}", part)]
+        j = judge(ctx.model, f"LP1-part{i}", rule, mats,
+                  f'This is part {i} of {len(parts)} of the Concept Building text. List in "covered_slos" the numbers of the SLOs that '
+                  'THIS part covers fully, with a quote for each. Set "verdict" to pass if it covers at least one SLO, otherwise unclear.',
+                  extra_keys=("covered_slos",),
+                  validate_extra=lambda e: isinstance(e.get("covered_slos"), list)
+                  and all(isinstance(x, int) and 1 <= x <= n for x in e["covered_slos"]))
+        if j.usable:
+            covered |= set(j.extra["covered_slos"])
+            quotes += j.quotes
+        elif j.note:
+            notes.append(f"part {i}: {j.note}")
+    if not quotes:
+        j = Judgement(note="; ".join(notes) or "the model found nothing usable in any part")
+        return suggestion("LP1", j, **where(key, doc))
+    missing = [x for x in range(1, n + 1) if x not in covered]
+    j = Judgement(verdict="fail" if missing else "pass", quotes=quotes[:3], usable=True,
+                  reason=(f"Concept Building was read in {len(parts)} parts; " +
+                          ("SLO(s) " + ", ".join(map(str, missing)) + " not covered in any part." if missing else "every SLO is covered in some part.")))
     f = suggestion("LP1", j, **where(key, doc))
-    if j.usable and j.extra.get("uncovered_slos"):
-        f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{n} ({slos[n - 1][:50]})" for n in j.extra["uncovered_slos"]))
+    if missing:
+        f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{x} ({slos[x - 1][:50]})" for x in missing))
+    if notes:
+        f.evidence.append("Parts the model could not answer: " + "; ".join(notes))
     return f
 
 
 def lp2(ctx, key, doc, secs, slos):
     if "concept_building" not in secs:
         return None
-    mats = [Material("SLOs (numbered)", numbered(slos)), Material("Concept Building", secs["concept_building"])]
+    rule = ctx.rules["LP2"].text if "LP2" in ctx.rules else "No scope creep in Concept Building"
     book = book_material(ctx, " ".join(slos)[:300])
-    if book:
-        mats.append(book)
-    j = judge(ctx.model, "LP2", ctx.rules["LP2"].text if "LP2" in ctx.rules else "No scope creep in Concept Building", mats,
-              "Does the Concept Building text contain anything that goes beyond what can be traced to a stated SLO"
-              + (" or the textbook passages" if book else "") + "? Answer fail only if you can quote the passage that goes beyond them.")
+    parts = _cb_parts(ctx, secs, slos) if not book else [secs["concept_building"]]
+    question = ("Does the Concept Building text contain anything that goes beyond what can be traced to a stated SLO"
+                + (" or the textbook passages" if book else "") + "? Answer fail only if you can quote the passage that goes beyond them.")
+    results = []
+    for i, part in enumerate(parts, 1):
+        label = "Concept Building" if len(parts) == 1 else f"Concept Building, part {i} of {len(parts)}"
+        mats = [Material("SLOs (numbered)", numbered(slos)), Material(label, part)] + ([book] if book else [])
+        results.append(judge(ctx.model, "LP2" if len(parts) == 1 else f"LP2-part{i}", rule, mats, question))
+    usable = [j for j in results if j.usable]
+    # scope creep anywhere is scope creep; a pass needs every part read
+    j = next((j for j in usable if j.verdict == "fail"), None) or (usable[0] if len(usable) == len(results) else
+                                                                 next((j for j in results if not j.usable), results[0]))
     f = suggestion("LP2", j, **where(key, doc))
+    if len(parts) > 1:
+        f.evidence.append(f"Concept Building was read in {len(parts)} parts")
     if not book:
         f.evidence.append("The textbook was not consulted (no --book-index), so this only compares against the SLOs")
     return f
@@ -352,7 +419,7 @@ def map_questions(ctx, tag, slo_items, questions):
     user = "SLOs:\n" + "\n".join(f"{i}. {t}" for i, (_, t) in enumerate(slo_items, 1)) + "\n\nQuestions:\n" + \
            "\n".join(f"{n}. {t[:300]}" for n, t in questions)
     try:
-        reply = cached_chat(ctx.model, "MAP-" + tag, MAP_SYSTEM, user[:MAX_MATERIAL_CHARS])
+        reply = cached_chat(ctx.model, "MAP-" + tag, MAP_SYSTEM, user[:material_budget(ctx.model)])
     except LLMError:
         return None
     rows = reply.get("mapping") if isinstance(reply, dict) else None
