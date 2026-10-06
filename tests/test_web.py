@@ -134,3 +134,18 @@ def test_textbook_indexes_in_the_books_folder_are_offered(tmp_path):
     (tmp_path / "books" / "islamiat" / "pages").mkdir(parents=True)
     a = create_app(jobs_dir=str(tmp_path / "jobs"), checklist=None, books_dir=str(tmp_path / "books"), executor=SyncExecutor())
     assert b"<option>islamiat</option>" in a.test_client().get("/").data
+
+
+def test_status_file_survives_a_locked_replace_and_progress_errors_do_not_stop_a_review(tmp_path, monkeypatch):
+    # Windows refuses os.replace while another handle has the file open; the write must retry, not fail.
+    import course_review.web as W
+    real, calls = W.os.replace, {"n": 0}
+
+    def flaky(a, b):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise PermissionError(5, "Access is denied")
+        return real(a, b)
+    monkeypatch.setattr(W.os, "replace", flaky)
+    W._write_meta(tmp_path, {"state": "running"})
+    assert W._read_meta(tmp_path) == {"state": "running"} and calls["n"] == 4

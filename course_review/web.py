@@ -118,17 +118,32 @@ class SyncExecutor:
         fn(*a, **k)
 
 
+# Status files are read by the page every two seconds while the review rewrites them. On Windows a file
+# cannot be replaced while another handle has it open, so reads and writes take turns, and a replace that
+# still meets a lock (antivirus, indexer) is retried briefly.
+_META_LOCK = threading.RLock()
+
+
 def _read_meta(job_dir: Path):
-    try:
-        return json.loads((job_dir / "meta.json").read_text(encoding="utf8"))
-    except (OSError, ValueError):
-        return None
+    with _META_LOCK:
+        try:
+            return json.loads((job_dir / "meta.json").read_text(encoding="utf8"))
+        except (OSError, ValueError):
+            return None
 
 
 def _write_meta(job_dir: Path, meta):
-    tmp = job_dir / "meta.json.tmp"
-    tmp.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf8")
-    os.replace(tmp, job_dir / "meta.json")
+    with _META_LOCK:
+        tmp = job_dir / "meta.json.tmp"
+        tmp.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf8")
+        for attempt in range(40):
+            try:
+                os.replace(tmp, job_dir / "meta.json")
+                return
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.05)
 
 
 def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", executor=None, max_upload_mb=500, cache_dir=None):
@@ -168,7 +183,10 @@ def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", ex
         update(d, state="running", stage="Starting")
 
         def progress(stage, done, total):
-            update(d, stage=stage + (f" ({done} of {total})" if total else ""), done=done, total=total)
+            try:
+                update(d, stage=stage + (f" ({done} of {total})" if total else ""), done=done, total=total)
+            except OSError:
+                pass          # a progress message that cannot be written must never stop the review
         try:
             model = None
             if opts["model_mode"] != "off":
