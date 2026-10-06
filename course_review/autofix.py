@@ -23,7 +23,7 @@ from lxml import etree
 
 from .checks.formatting import own_number
 from .models import FAIL, NA, PASS
-from .textutil import EASTERN_DIGITS, normalize, script_counts, to_western_digits
+from .textutil import EASTERN_DIGITS, VERSE_MARK, is_arabic_scripture, normalize, script_counts, to_western_digits
 
 # Codes the fixer works on. A Fail on one of them is re-checked on the fixed copy (see remaining).
 DOCX_FIXED = {"WE4", "WE6", "WE7", "WE8", "WE10", "WE11", "WE12", "WE13", "LP4", "WE15", "WE16", "WE23", "WE25", "WEG1",
@@ -253,8 +253,9 @@ def fix_docx(src, dst, ctx, doc, info):
     heads = doc_headings(ctx, info)
     head_ids = {p.idx for p in heads}
     levels, numbers = {}, {}
-    if doc.doc_type == "lesson_plan":
-        secs = lp_ranges(ctx, info)
+    secs = lp_ranges(ctx, info) if doc.doc_type == "lesson_plan" else {}
+    number_heads = doc.doc_type != "lesson_plan" or len(secs) >= 4
+    if doc.doc_type == "lesson_plan" and number_heads:
         starts = sorted((r[0], k) for k, r in secs.items())
         top = {i for i, _ in starts}
         n1 = n2 = 0
@@ -272,7 +273,7 @@ def fix_docx(src, dst, ctx, doc, info):
         for n, p in enumerate(heads, 1):
             levels[p.idx], numbers[p.idx] = 1, f"{n}"
 
-    digits = recoloured = flipped = 0
+    digits = recoloured = flipped = quoted = 0
     for p, el in zip(info.paras, els):
         ppr = el.find(qn("w:pPr"))
         if ppr is None:
@@ -301,10 +302,14 @@ def fix_docx(src, dst, ctx, doc, info):
             role = "body"
         size = {"title": sz["title"], "head": sz["section_heading"], "theader": sz["table_header"],
                 "table": sz["table_body"], "body": sz["body"]}[role]
+        scripture = is_arabic_scripture(p.text)
         for r in el.iter(qn("w:r")):
             text = _run_text(r)
             if not text:
                 continue
+            if scripture or is_arabic_scripture(text):
+                quoted += 1
+                continue                  # Quran / hadith / dua text is quoted exactly: no font, size, digit or colour change
             rpr = _rpr(r)
             ar, la = script_counts(text)
             if ar or la:
@@ -331,12 +336,18 @@ def fix_docx(src, dst, ctx, doc, info):
                 rpr.remove(shd)
             for t in r.iter(qn("w:t")):
                 if t.text and EASTERN_DIGITS.search(t.text):
-                    digits += len(EASTERN_DIGITS.findall(t.text))
-                    t.text = to_western_digits(t.text)
+                    # verse numbers in ﴿ ﴾ stay as written; other Urdu digits become Western
+                    parts = VERSE_MARK.split(t.text)
+                    marks_ = VERSE_MARK.findall(t.text)
+                    new = "".join(to_western_digits(x) + (marks_[i] if i < len(marks_) else "") for i, x in enumerate(parts))
+                    digits += sum(1 for a, b in zip(t.text, new) if a != b)
+                    t.text = new
         # paragraph shading
         _drop(ppr, "w:shd")
     if digits:
         lines.append(f"{digits} Urdu digits changed to Western (1, 2, 3)")
+    if quoted:
+        lines.append("Quran, hadith and dua text (fully vowelled Arabic) was left exactly as written")
     if flipped:
         lines.append(f"Text direction corrected on {flipped} paragraph(s) (right-to-left for Urdu, left-to-right for English)")
     lines.append(f"Line spacing 1.15 and 8 pt after every paragraph; fonts {urdu_font} / {eng_font}; Grade {grade} sizes "
@@ -364,7 +375,7 @@ def fix_docx(src, dst, ctx, doc, info):
             ppr = el.find(qn("w:pPr"))
             _set(ppr, "w:pStyle", {"w:val": st.style_id})
             ts = list(el.iter(qn("w:t")))
-            if ts and not own_number(ctx, p.text):           # never true for a heading the checks count; kept as a guard
+            if ts and number_heads and p.idx in numbers and not own_number(ctx, p.text):
                 old = leading_number(p.text)
                 first_t = next((t for t in ts if (t.text or "").strip()), ts[0])
                 text = first_t.text or ""
@@ -372,7 +383,8 @@ def fix_docx(src, dst, ctx, doc, info):
                     text = re.sub(r"^\s*[\d٠-٩۰-۹]+(?:[.][\d٠-٩۰-۹]+)*[.)]?\s*", "", text)
                 first_t.text = f"{numbers[p.idx]} {text.lstrip()}"
                 first_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-        lines.append(f"{len(heads)} heading(s) given Heading styles and decimal numbers (1, 1.1)")
+        lines.append(f"{len(heads)} heading(s) given Heading styles" + (" and decimal numbers (1, 1.1)" if number_heads else
+                     "; not numbered, because the document does not follow the five Lesson Plan sections (see the comments)"))
 
     # numbered list items -> bullets (numbering is only for the major headings)
     bulleted = 0
@@ -472,7 +484,7 @@ def fix_docx(src, dst, ctx, doc, info):
             _set(settings, "w:updateFields", {"w:val": "true"})
             lines.append("Table of Contents inserted after the title (Word fills it in when the file is opened)")
     d.save(dst)
-    return lines, {"ticked": ticked, "toc": any("Table of Contents" in l for l in lines)}
+    return lines, {"ticked": ticked, "toc": any("Table of Contents" in l for l in lines), "numbered": number_heads}
 
 
 def _ppr_of(p):

@@ -84,3 +84,13 @@ From the same review of `0a2d3a2`, still open:
   the "name";
 * ~~a file without a version is renamed to `v0.1`~~: fixed next, see
   [fix-version-and-web-page.md](fix-version-and-web-page.md).
+
+## Merged with master `968fea4`
+
+`49df2e1` on master added one more case to the old `settled()`: when a Lesson Plan does not follow
+the five sections, headings get Heading styles but no numbers, and WE12 / LP4 must stay for a
+person. The re-check covers this without a special case (the unnumbered headings still fail
+WE12 / LP4 on the fixed copy, so those comments stay; WE13 passes, so it is left out), so the
+merge keeps `remaining()` and drops `settled()`. Test:
+`test_headings_left_unnumbered_keep_their_numbering_comment`. The Quran / hadith test and the
+Windows status-file fix from master are kept as they are.

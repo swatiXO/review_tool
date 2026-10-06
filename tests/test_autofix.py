@@ -123,3 +123,52 @@ def test_version_is_taken_from_the_footer(tmp_path):
     assert "v2.1" in d.sections[0].footer.paragraphs[0].text
     assert "Version v2.1 taken from the footer" in text
     assert "WE3 CHECK" in text                 # a person still confirms it matches the document's stage
+
+
+def test_quran_hadith_and_dua_text_is_never_edited(tmp_path):
+    from docx import Document
+    root = tmp_path / "Grade-6-Islamiat"
+    ch = root / "Chapter-1-Quran"
+    ch.mkdir(parents=True)
+    d = new_doc(size=11)
+    add(d, "باب اول: قرآن مجید", bold=True, rtl=True)
+    add(d, "سورۃ العصر", bold=True, rtl=True)
+    verse = "وَالْعَصْرِ ﴿١﴾ إِنَّ الْإِنسَانَ لَفِي خُسْرٍ ﴿٢﴾"
+    add(d, "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", bold=True, rtl=True, urdu_font="Traditional Arabic")
+    add(d, verse, rtl=True, urdu_font="Traditional Arabic")
+    add(d, "ترجمہ: زمانے کی قسم ﴿١﴾ آیت ٢ میں", rtl=True)
+    d.save(str(ch / "Chapter-1-Lesson-Plan.docx"))
+    out = tmp_path / "out"
+    cli.review(zip_dir(str(root), str(tmp_path / "p.zip")), str(checklist(tmp_path)), str(out))
+    z = zipfile.ZipFile(out / cli.MARKED_UP)
+    name = next(n for n in z.namelist() if n.endswith(".docx"))
+    (tmp_path / "f.docx").write_bytes(z.read(name))
+    texts = [p.text for p in Document(str(tmp_path / "f.docx")).paragraphs]
+    assert "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ" in texts            # not numbered as a heading
+    assert verse in texts                                       # ayah numbers kept as written
+    assert "ترجمہ: زمانے کی قسم ﴿١﴾ آیت 2 میں" in texts           # Urdu digit fixed, the verse mark kept
+    fonts = {r.font.element.rPr.rFonts.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cs")
+             for p in Document(str(tmp_path / "f.docx")).paragraphs if p.text == verse for r in p.runs}
+    assert fonts == {"Traditional Arabic"}
+
+
+def test_headings_left_unnumbered_keep_their_numbering_comment(tmp_path):
+    # A Lesson Plan without the five sections gets Heading styles but no numbers: WE12 / LP4 stay for a person.
+    from docx import Document
+    root = tmp_path / "Grade-6-Islamiat"
+    lesson = root / "Chapter-1-Quran" / "Lesson-1-Asr"
+    lesson.mkdir(parents=True)
+    d = new_doc(size=11)
+    add(d, "سبق: سورۃ العصر", bold=True, rtl=True)
+    for h in ("تعارف", "حاصلات تعلیم", "ب - حفظ"):
+        add(d, h, bold=True, size=14, rtl=True)
+        add(d, URDU, rtl=True)
+    d.save(str(lesson / "Lesson-1-Chapter-1-Lesson-Plan.docx"))
+    out = tmp_path / "o"
+    cli.review(zip_dir(str(root), str(tmp_path / "p.zip")), str(checklist(tmp_path)), str(out))
+    z = zipfile.ZipFile(out / cli.MARKED_UP)
+    (tmp_path / "f.docx").write_bytes(z.read(next(n for n in z.namelist() if n.endswith(".docx"))))
+    text = "\n".join(c.text for c in Document(str(tmp_path / "f.docx")).comments)
+    assert "not numbered" in text
+    assert "WE12 FAIL" in text and "LP4 FAIL" in text
+    assert "WE13 FAIL" not in text                       # the Heading styles were applied

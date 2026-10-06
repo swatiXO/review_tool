@@ -147,3 +147,18 @@ def test_result_page_shows_counts_rules_and_documents(app, tmp_path):
     home = c.get("/").data.decode()
     assert 'class="pill p-fail"' in home and "Drop the course package" in home
     assert meta["state"] == "done"
+
+
+def test_status_file_survives_a_locked_replace_and_progress_errors_do_not_stop_a_review(tmp_path, monkeypatch):
+    # Windows refuses os.replace while another handle has the file open; the write must retry, not fail.
+    import course_review.web as W
+    real, calls = W.os.replace, {"n": 0}
+
+    def flaky(a, b):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise PermissionError(5, "Access is denied")
+        return real(a, b)
+    monkeypatch.setattr(W.os, "replace", flaky)
+    W._write_meta(tmp_path, {"state": "running"})
+    assert W._read_meta(tmp_path) == {"state": "running"} and calls["n"] == 4

@@ -131,7 +131,11 @@ def test_we10_flags_eastern_digits_and_notes_verse_markers(tmp_path):
     d = new_doc()
     add(d, "﴿١﴾ ایک ۲۳")
     r = run("WE10", d, tmp_path)
-    assert r.status == FAIL and "verse-number" in r.message
+    assert r.status == FAIL and "2 non-Western" in r.message and "verse-number" in " ".join(r.evidence)
+    d = new_doc()
+    add(d, "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ ﴿١﴾")             # quoted scripture: left as written
+    r = run("WE10", d, tmp_path)
+    assert r.status == PASS and r.partial
 
 
 def test_we11_direction_matches_script(tmp_path):
