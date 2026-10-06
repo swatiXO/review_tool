@@ -6,7 +6,7 @@ import re
 from ..docx_model import DocxInfo
 from ..models import FAIL, NA, PASS, REVIEW
 from ..textutil import normalize, starts_with_label, to_western_digits
-from .common import result
+from .common import mark, result
 from .formatting import we12
 
 
@@ -73,7 +73,8 @@ def lp5(ctx, doc, info: DocxInfo):
             bad.append(("not a bullet", p))
     if bad:
         ev = [f"'{p.text.strip()[:40]}' is {why}" for why, p in bad[:6]]
-        return result("LP5", FAIL, f"{len(bad)} of {len(items)} SLO items are not bullets ({bad[0][0]})", ev)
+        return result("LP5", FAIL, f"{len(bad)} of {len(items)} SLO items are not bullets ({bad[0][0]})", ev,
+                      marks=[mark(p.text, f"SLO item is {why}, should be a bullet") for why, p in bad])
     return result("LP5", PASS, f"All {len(items)} SLO items are bullets")
 
 

@@ -14,7 +14,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from . import engine, fallback, ingest, report, workbook
+from . import annotate, engine, fallback, ingest, report, workbook
 from .llm import OllamaClient
 
 
@@ -32,6 +32,9 @@ def make_model(mode, url=None, model=None, cache_dir=".course_review_cache", jud
     return fallback.ModelConfig(client=client, cache=fallback.Cache(cache_dir), mode=mode, judge=judge, codes=codes)
 
 
+MARKED_UP = "Marked-up-documents.zip"
+
+
 def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None, progress=None):
     t0 = time.time()
     profile = ingest.load_profile(profile_path)
@@ -46,6 +49,8 @@ def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=No
         res = engine.run(pkg, profile, rules, layout, model=model, book=book, progress=progress)
         say("Writing the workbook and report", 0, 0)
         xlsx = report.write_outputs(pkg, res, rules, layout, checklist, out_dir, Path(zip_path).name, model=model)
+        say("Marking up the documents", 0, 0)
+        annotate.annotate_package(pkg, res.findings, Path(out_dir) / MARKED_UP, rules)
     finally:
         if not keep:
             shutil.rmtree(work, ignore_errors=True)
@@ -187,6 +192,7 @@ def main(argv=None):
     print(f"Wrote {xlsx}")
     print(f"      {Path(a.out) / 'report.html'}")
     print(f"      {Path(a.out) / 'review.json'}")
+    print(f"      {Path(a.out) / MARKED_UP}  (the documents with problems highlighted and commented)")
     if res.errors:
         print(f"{len(res.errors)} file(s) could not be read; see the report", file=sys.stderr)
 

@@ -12,7 +12,7 @@ from ..models import FAIL, NA, PASS, REVIEW, LessonKey
 from ..questions import (BankItem, load_bank_items, numbering_is_regular, parse_questions, segment_lessons, para_is_highlighted)
 from ..fallback import recover_questions
 from ..textutil import dominant_script, normalize, to_western_digits
-from .common import result
+from .common import result, mark
 
 
 def _policy_one(ctx, f, summary):
@@ -130,13 +130,15 @@ def pop_quiz_checks(ctx):
         if notmcq:
             ev.append(f"question(s) {notmcq} are not MCQ")
             bad = True
-        out.append(result("PQ1", FAIL if bad else PASS, "; ".join(ev) or f"{len(qs)} MCQ questions", ev, lesson=key, doc=_pq_rel(ctx)))
+        out.append(result("PQ1", FAIL if bad else PASS, "; ".join(ev) or f"{len(qs)} MCQ questions", ev, lesson=key, doc=_pq_rel(ctx),
+                          marks=[mark(q.text, "not a multiple-choice question") for q in qs if q.qtype != "mcq"]))
 
         labels = vocab["lesson_plan_location_labels"]
         missing = [q.num for q in qs if not _label_present(q.block, labels)]
         if missing:
             out.append(result("PQ2", FAIL, f"Question(s) {missing} do not state a 'Lesson Plan Location' (label looked for: {', '.join(labels)})",
-                              lesson=key, doc=_pq_rel(ctx)))
+                              lesson=key, doc=_pq_rel(ctx),
+                              marks=[mark(q.text, "no 'Lesson Plan Location' given") for q in qs if q.num in missing]))
         else:
             out.append(result("PQ2", PASS, "Every question states a Lesson Plan Location", partial=True,
                               evidence=["Whether each location is precise needs a reviewer."], lesson=key, doc=_pq_rel(ctx)))
@@ -145,7 +147,8 @@ def pop_quiz_checks(ctx):
         nofb = [q.num for q in qs if not _label_present(q.block, fl)]
         if nofb:
             out.append(result("PQ3", FAIL, f"Question(s) {nofb} have no correct/incorrect feedback (labels looked for: {', '.join(fl)})",
-                              lesson=key, doc=_pq_rel(ctx)))
+                              lesson=key, doc=_pq_rel(ctx),
+                              marks=[mark(q.text, "no correct/incorrect feedback") for q in qs if q.num in nofb]))
         else:
             out.append(result("PQ3", PASS, "Feedback present on every question", partial=True,
                               evidence=["Whether the feedback meets the standard needs a reviewer."], lesson=key, doc=_pq_rel(ctx)))
@@ -154,7 +157,9 @@ def pop_quiz_checks(ctx):
         if nohl:
             marked = [q.num for q in qs if q.check_marked]
             extra = f"; answers are marked with a check-mark symbol on question(s) {marked}, not a yellow highlight" if marked else ""
-            out.append(result("PQ4", FAIL, f"Correct answer is not highlighted yellow on question(s) {nohl}{extra}", lesson=key, doc=_pq_rel(ctx)))
+            out.append(result("PQ4", FAIL, f"Correct answer is not highlighted yellow on question(s) {nohl}{extra}", lesson=key, doc=_pq_rel(ctx),
+                              marks=[mark(q.text, "correct answer is not highlighted yellow" + (" (a check mark is used instead)" if q.check_marked else ""))
+                                     for q in qs if not q.highlighted]))
         else:
             out.append(result("PQ4", PASS, "Correct answer highlighted yellow on every question", lesson=key, doc=_pq_rel(ctx)))
     if ctx.model is not None:
@@ -201,7 +206,8 @@ def _tag_check(ctx, code, qs, info, key=None, chapter=None, doc=None):
         return result(code, REVIEW, "Some SLO tags exist but the questions could not be matched one-to-one", lesson=key, chapter=chapter, doc=doc)
     untagged = [q.num for q in qs if not _slo_tag_present(ctx, q.block)]
     if untagged:
-        return result(code, FAIL, f"Question(s) {untagged} carry no SLO tag", lesson=key, chapter=chapter, doc=doc)
+        return result(code, FAIL, f"Question(s) {untagged} carry no SLO tag", lesson=key, chapter=chapter, doc=doc,
+                      marks=[mark(q.text, "question has no SLO tag") for q in qs if q.num in untagged])
     return result(code, PASS, "Every question is SLO-tagged", lesson=key, chapter=chapter, doc=doc)
 
 
@@ -370,7 +376,8 @@ def data_bank_checks(ctx):
 
         nohl = sum(1 for i in its if not i.highlighted)
         if nohl:
-            out.append(result("DB4", FAIL, f"Correct answer is not highlighted yellow on {nohl} of {len(its)} items", lesson=k, doc=bank.rel))
+            out.append(result("DB4", FAIL, f"Correct answer is not highlighted yellow on {nohl} of {len(its)} items", lesson=k, doc=bank.rel,
+                              marks=[mark(i.fields.get("question", ""), "correct answer is not highlighted yellow") for i in its if not i.highlighted]))
         else:
             out.append(result("DB4", PASS, "Correct answer highlighted yellow on every item", lesson=k, doc=bank.rel))
 
@@ -381,10 +388,11 @@ def data_bank_checks(ctx):
                 continue
             for pt in pop_texts:
                 if SequenceMatcher(None, qt, pt).ratio() >= sim_th:
-                    dups.append(qt[:50])
+                    dups.append(qt)
                     break
         if dups:
-            out.append(result("DB5", FAIL, f"{len(dups)} item(s) near-duplicate a Pop Quiz question", dups[:5], lesson=k, doc=bank.rel))
+            out.append(result("DB5", FAIL, f"{len(dups)} item(s) near-duplicate a Pop Quiz question", [d[:50] for d in dups[:5]], lesson=k, doc=bank.rel,
+                              marks=[mark(d, "nearly the same as a Pop Quiz question") for d in dups]))
         else:
             out.append(result("DB5", REVIEW, "No near-identical wording found; whether any item is a reworded duplicate needs a reviewer",
                               lesson=k, doc=bank.rel))

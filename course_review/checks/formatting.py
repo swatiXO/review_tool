@@ -13,7 +13,7 @@ from ..models import FAIL, NA, PASS, REVIEW
 from ..pptx_model import PptxInfo
 from ..questions import is_yellow
 from ..textutil import EASTERN_DIGITS, normalize, to_western_digits
-from .common import canon_font, is_grey, pct, result, top
+from .common import canon_font, is_grey, mark, pct, result, top
 
 A4 = (8.27, 11.69)
 
@@ -222,24 +222,25 @@ def we8(ctx, doc, info: DocxInfo):
 # ----------------------------------------------------------------- bilingual
 
 def we10(ctx, doc, info):
-    hits, verse = [], 0
-    texts = [p.text for p in info.paras] if isinstance(info, DocxInfo) else [r.text for r in info.runs]
+    hits, verse, marks = [], 0, []
+    texts = [(p.text, None) for p in info.paras] if isinstance(info, DocxInfo) else [(r.text, r.slide) for r in info.runs]
     marker = re.compile("﴿[^﴾]*﴾")  # Quranic verse-number ornament
-    for t in texts:
+    for t, slide in texts:
         found = EASTERN_DIGITS.findall(t)
         if found:
             hits.append((t.strip()[:60], len(found)))
+            marks.append(mark(t, "non-Western digits: " + " ".join(found[:5]), slide))
             verse += sum(len(EASTERN_DIGITS.findall(m)) for m in marker.findall(t))
     if hits:
         total = sum(n for _, n in hits)
         extra = f", {verse} of them inside Quranic verse-number markers" if verse else ""
         return result("WE10", FAIL, f"{total} non-Western digit(s) in {len(hits)} place(s){extra}",
-                      [f"'{t}' ({n})" for t, n in hits[:6]])
+                      [f"'{t}' ({n})" for t, n in hits[:6]], marks=marks)
     return result("WE10", PASS, "All numerals are Western (1, 2, 3)")
 
 
 def we11(ctx, doc, info: DocxInfo):
-    bad = []
+    bad, marks = [], []
     for p in info.paras:
         if not p.runs:
             continue
@@ -250,8 +251,9 @@ def we11(ctx, doc, info: DocxInfo):
         want_rtl = ar >= la
         if p.bidi != want_rtl:
             bad.append(f"paragraph {p.idx + 1} is {'RTL' if want_rtl else 'LTR'} text but set {'LTR' if want_rtl else 'RTL'}: '{p.text.strip()[:40]}'")
+            marks.append(mark(p.text, f"{'Urdu' if want_rtl else 'English'} text set {'left-to-right' if want_rtl else 'right-to-left'}"))
     if bad:
-        return result("WE11", FAIL, f"{len(bad)} paragraph(s) have the wrong text direction", bad[:6])
+        return result("WE11", FAIL, f"{len(bad)} paragraph(s) have the wrong text direction", bad[:6], marks=marks)
     return result("WE11", PASS, "Paragraph direction matches the script of its text", partial=True,
                   evidence=["Mid-sentence direction switching was not checked."])
 
@@ -266,10 +268,11 @@ def _neutral(hex_val, theme, th):
 
 def we23(ctx, doc, info):
     th = ctx.th
-    found = Counter()
+    found, marks = Counter(), []
     exempt_highlight = doc.doc_type in ("pop_quiz", "data_bank")
     if isinstance(info, DocxInfo):
         for p in info.paras:
+            before = sum(found.values())
             for r in p.runs:
                 if r.color and r.color.lower() != "auto" and not _neutral(r.color, r.theme_color, th):
                     found[f"text colour #{r.color}"] += len(r.text)
@@ -282,6 +285,8 @@ def we23(ctx, doc, info):
                     found[f"run shading #{r.shading}"] += len(r.text)
             if p.shading and p.shading.lower() not in ("auto", "ffffff") and not is_grey(p.shading, th["colour_grey_tolerance"]):
                 found[f"paragraph shading #{p.shading}"] += 1
+            if sum(found.values()) > before and p.text.strip():
+                marks.append(mark(p.text, "colour used (only black, white and grey are allowed)"))
         for t in info.tables:
             for f in t.cell_shadings:
                 if f and f.lower() not in ("auto", "ffffff") and not is_grey(f, th["colour_grey_tolerance"]) and not \
@@ -295,14 +300,16 @@ def we23(ctx, doc, info):
         for r in info.runs:
             if r.color and not is_grey(r.color, th["colour_grey_tolerance"]):
                 found[f"text colour #{r.color}"] += len(r.text)
+                marks.append(mark(r.text, f"text colour #{r.color}", r.slide))
             elif r.scheme and r.scheme not in ("tx1", "bg1", "dk1", "lt1", "tx2", "bg2", "dk2", "lt2"):
                 found[f"theme colour {r.scheme}"] += len(r.text)
+                marks.append(mark(r.text, f"theme colour {r.scheme}", r.slide))
         for slide, kind, val in info.fills:
             hexv = val if val and len(val) == 6 and re.match(r"^[0-9A-Fa-f]{6}$", val) else tmap.get(val or "", None)
             if hexv and not is_grey(hexv, th["colour_grey_tolerance"]):
                 found[f"{kind} fill #{hexv}"] += 1
     if found:
-        return result("WE23", FAIL, "Colour used: " + top(found, 3), [f"{k} ({v})" for k, v in found.most_common(8)])
+        return result("WE23", FAIL, "Colour used: " + top(found, 3), [f"{k} ({v})" for k, v in found.most_common(8)], marks=marks)
     return result("WE23", PASS, "Text, shading and styles are black, white or grey",
                   partial=not isinstance(info, DocxInfo),
                   evidence=["Colours inherited from the slide master/theme were not resolved."] if not isinstance(info, DocxInfo) else [])
@@ -338,7 +345,7 @@ def we12(ctx, doc, info: DocxInfo):
     heads = [p for p in info.paras if heading_like(ctx, p)]
     if not heads:
         return result("WE12", NA, "No headings found")
-    seqs, unnumbered, ev = [], [], []
+    seqs, unnumbered, ev, marks = [], [], [], []
     for p in heads:
         if p.num_label:
             nums = tuple(int(x) for x in re.findall(r"\d+", p.num_label)) if p.list_kind == "decimal" else None
@@ -346,6 +353,7 @@ def we12(ctx, doc, info: DocxInfo):
             nums = leading_number(p.text)
         if nums is None:
             unnumbered.append(p)
+            marks.append(mark(p.text, "heading has no decimal number (1, 1.1, 1.1.1)"))
         else:
             seqs.append((p, nums))
     if unnumbered:
@@ -354,6 +362,7 @@ def we12(ctx, doc, info: DocxInfo):
     prev = ()
     for p, nums in seqs:
         label = ".".join(map(str, nums))
+        n_ev = len(ev)
         if len(nums) > 3:
             ev.append(f"'{label}' goes deeper than three levels")
         elif len(nums) > len(prev) + 1:
@@ -364,9 +373,11 @@ def we12(ctx, doc, info: DocxInfo):
             ev.append(f"'{label}' is out of order after {'.'.join(map(str, prev))}")
         elif len(nums) == 1 and not prev and nums[0] != 1:
             ev.append(f"numbering starts at {nums[0]}, not 1")
+        if len(ev) > n_ev:
+            marks.append(mark(p.text, ev[-1]))
         prev = nums
     if ev:
-        return result("WE12", FAIL, ev[0], ev[:6])
+        return result("WE12", FAIL, ev[0], ev[:6], marks=marks)
     return result("WE12", PASS, f"{len(heads)} headings use correct decimal numbering")
 
 
@@ -377,7 +388,8 @@ def we13(ctx, doc, info: DocxInfo):
     fake = [p for p in heads if not p.heading_level]
     if fake:
         return result("WE13", FAIL, f"{len(fake)} of {len(heads)} headings use the '{fake[0].style}' style, not a built-in Heading style",
-                      [f"'{p.text.strip()[:40]}' (style: {p.style})" for p in fake[:6]])
+                      [f"'{p.text.strip()[:40]}' (style: {p.style})" for p in fake[:6]],
+                      marks=[mark(p.text, f"looks like a heading but uses the '{p.style}' style, not a Heading style") for p in fake])
     return result("WE13", PASS, "All headings use built-in Heading styles")
 
 
@@ -397,19 +409,23 @@ def we16(ctx, doc, info: DocxInfo):
     if not info.tables:
         return result("WE16", NA, "No tables")
     cap = _caption_re(ctx, "table")
-    bad = []
+    bad, marks = [], []
     expected = 1
     for t in info.tables:
         prev = info.paras[t.prev_para] if t.prev_para is not None else None
         m = cap.match(normalize(prev.text)) if prev else None
+        first = next((info.paras[i] for i in t.para_idx if info.paras[i].text.strip()), None)
         if not m:
             bad.append(f"table {t.idx + 1} has no 'Table N:' caption directly above")
+            if first:
+                marks.append(mark(first.text, bad[-1]))
         else:
             if int(m.group(1)) != expected:
                 bad.append(f"table {t.idx + 1} caption is numbered {m.group(1)}, expected {expected}")
+                marks.append(mark(prev.text, bad[-1]))
             expected = int(m.group(1)) + 1
     if bad:
-        return result("WE16", FAIL, f"{len(bad)} of {len(info.tables)} tables fail: {bad[0]}", bad[:6])
+        return result("WE16", FAIL, f"{len(bad)} of {len(info.tables)} tables fail: {bad[0]}", bad[:6], marks=marks)
     return result("WE16", PASS, f"All {len(info.tables)} tables have a numbered caption above")
 
 
@@ -504,7 +520,7 @@ _NOT_APA = [
 ]
 
 
-def _citations(info):
+def _citations(info, marks=None):
     good, bad = [], []
     for p in info.paras:
         t = p.text
@@ -512,15 +528,18 @@ def _citations(info):
         for rx, why in _NOT_APA:
             for m in rx.findall(t):
                 bad.append(f"{m} ({why})")
+                if marks is not None:
+                    marks.append(mark(t, f"citation {m} is not (Author, Year): {why}"))
     return good, bad
 
 
 def we21(ctx, doc, info: DocxInfo):
-    good, bad = _citations(info)
+    marks = []
+    good, bad = _citations(info, marks)
     if not good and not bad:
         return result("WE21", NA, "No outside-research citations found (Quran and Hadith references are not APA citations)")
     if bad:
-        return result("WE21", FAIL, f"{len(bad)} citation(s) are not (Author, Year)", bad[:6])
+        return result("WE21", FAIL, f"{len(bad)} citation(s) are not (Author, Year)", bad[:6], marks=marks)
     return result("WE21", PASS, f"{len(good)} in-text citation(s), all (Author, Year)")
 
 

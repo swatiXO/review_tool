@@ -24,7 +24,8 @@ from . import cli
 
 JOB_ID = re.compile(r"^[0-9a-f]{12}$")
 DOWNLOADS = {"report.html": "text/html; charset=utf-8", "Course-Review-Checklist-filled.xlsx":
-             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "review.json": "application/json"}
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "review.json": "application/json",
+             cli.MARKED_UP: "application/zip"}
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -91,10 +92,12 @@ JOB = """
   <p class="bad">The review could not finish.</p><p>{{ job.error }}</p>
 {% else %}
   <p class="ok">Done in {{ job.seconds }} s: {{ job.summary }}</p>
-  <div class="row"><a class="btn" href="{{ url_for('download', job_id=job.id, name='Course-Review-Checklist-filled.xlsx') }}">Download filled workbook</a>
+  <div class="row"><a class="btn" href="{{ url_for('download', job_id=job.id, name='Marked-up-documents.zip') }}">Download marked-up documents</a>
+  <a href="{{ url_for('download', job_id=job.id, name='Course-Review-Checklist-filled.xlsx') }}">Filled workbook</a>
   <a href="{{ url_for('download', job_id=job.id, name='report.html') }}" target="_blank">Open the report</a>
   <a href="{{ url_for('download', job_id=job.id, name='review.json') }}">JSON</a></div>
-  <p class="mut">A blank cell in the workbook means the tool did not decide it; the Notes column says why.</p>
+  <p class="mut">In the marked-up documents: red = fails the checklist, turquoise = model suggestion for a reviewer, green = passes.
+  Each highlight has a comment naming the checklist item. A blank cell in the workbook means the tool did not decide it.</p>
 {% endif %}</div>
 <form method="post" action="{{ url_for('delete_job', job_id=job.id) }}"><button class="link" type="submit">Delete this review and its files</button></form></div>
 {% if job.state in ('queued','running') %}<script>
@@ -256,7 +259,7 @@ def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", ex
         d = job_dir(job_id)
         if name not in DOWNLOADS or not (d / name).exists():
             abort(404)
-        resp = send_from_directory(d, name, mimetype=DOWNLOADS[name].split(";")[0], as_attachment=name.endswith(("xlsx", "json")))
+        resp = send_from_directory(d, name, mimetype=DOWNLOADS[name].split(";")[0], as_attachment=name.endswith(("xlsx", "json", "zip")))
         if name == "report.html":
             resp.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
         return resp

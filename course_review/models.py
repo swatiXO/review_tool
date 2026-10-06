@@ -61,6 +61,7 @@ class Finding:
     doc: Optional[str] = None
     partial: bool = False         # a pass that covers only part of the rule text
     method: str = "deterministic"
+    marks: list = field(default_factory=list)   # [{"text", "note", "slide"?}] places to highlight in the document
 
     def to_dict(self):
         return {

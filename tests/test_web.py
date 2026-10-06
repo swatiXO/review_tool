@@ -42,7 +42,7 @@ def test_upload_runs_a_review_and_serves_the_results(app, tmp_path):
     status = c.get(f"/jobs/{job}/status").get_json()
     assert status["state"] == "done" and "documents" in status["summary"]
     page = c.get(f"/jobs/{job}")
-    assert b"Download filled workbook" in page.data and b"course.zip" in page.data
+    assert b"Filled workbook" in page.data and b"course.zip" in page.data
     xlsx = c.get(f"/jobs/{job}/files/Course-Review-Checklist-filled.xlsx")
     assert xlsx.status_code == 200 and "attachment" in xlsx.headers["Content-Disposition"]
     wb = openpyxl.load_workbook(io.BytesIO(xlsx.data))
@@ -50,6 +50,9 @@ def test_upload_runs_a_review_and_serves_the_results(app, tmp_path):
     rep = c.get(f"/jobs/{job}/files/report.html")
     assert rep.status_code == 200 and b"default-src 'none'" in rep.headers["Content-Security-Policy"].encode()
     assert json.loads(c.get(f"/jobs/{job}/files/review.json").data)["findings"]
+    z = c.get(f"/jobs/{job}/files/Marked-up-documents.zip")
+    assert z.status_code == 200 and "attachment" in z.headers["Content-Disposition"] and z.data[:2] == b"PK"
+    assert b"Download marked-up documents" in page.data
 
 
 def test_downloads_work_with_relative_folders_as_serve_uses_them(tmp_path, monkeypatch):
@@ -57,7 +60,7 @@ def test_downloads_work_with_relative_folders_as_serve_uses_them(tmp_path, monke
     a = create_app(jobs_dir="web_jobs", checklist=checklist(tmp_path), books_dir="book_indexes", executor=SyncExecutor())
     c = a.test_client()
     job = upload(c, zip_bytes(tmp_path)).headers["Location"].rsplit("/", 1)[-1]
-    for name in ("Course-Review-Checklist-filled.xlsx", "report.html", "review.json"):
+    for name in ("Course-Review-Checklist-filled.xlsx", "report.html", "review.json", "Marked-up-documents.zip"):
         assert c.get(f"/jobs/{job}/files/{name}").status_code == 200, name
 
 

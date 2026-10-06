@@ -21,6 +21,7 @@ python -m course_review.cli review PACKAGE.zip --checklist Course-Review-Checkli
 
 | Output | What it is |
 |---|---|
+| `Marked-up-documents.zip` | **The package itself, marked up.** Every Word file has its problems highlighted in the text: red = fails the checklist, turquoise = a model suggestion for a reviewer to decide, green = passes. Each highlight carries a Word comment naming the checklist code and the reason, and a comment on the first paragraph lists the whole-document results (fonts, page size, file name). Existing highlights are never replaced, so yellow correct answers stay yellow. Slides get the highlight plus a red-bordered "Course Review notes" box. Results that belong to no single file (a missing Data Bank, subject-wide coverage) are in `REVIEW-NOTES.txt`. |
 | `Course-Review-Checklist-filled.xlsx` | Your own workbook, one row per lesson / chapter. **A blank cell means the tool did not decide it**; the Notes column says why. Extra sheets: `Review Summary` (what the tool decides, per code) and `SLO Coverage`. |
 | `report.html` | Subject-level results with per-document evidence, per-lesson grids, SLO coverage, package inventory. |
 | `review.json` | Every finding with status, message, evidence, the document it came from, and whether a model helped. |
@@ -118,6 +119,7 @@ course_review/
                   judgement (model-assisted), registry
   engine.py       runs everything, rolls up to subject level, derives LP10 / FG8, builds the grids
   fallback.py llm.py judge.py formats.py book.py evaluate.py     the model-assisted parts
+  annotate.py     the marked-up copy: highlights and comments written into the .docx / .pptx files
   report.py web.py cli.py
 tests/            offline tests on generated documents and stand-in models; live tests skip without OLLAMA_URL
 ```

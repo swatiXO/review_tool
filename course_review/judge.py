@@ -156,8 +156,9 @@ def judge(model, code, rule_text, materials, instruction, extra_keys=(), validat
 
 def suggestion(code, j, **where):
     """A needs-review finding that carries the model's suggestion, or a note that it could not decide."""
-    from .checks.common import result
+    from .checks.common import mark, result
     from .models import REVIEW
+    marks = []
     if j.usable:
         msg = f"[model-assisted] Would be {j.verdict}: {j.reason}"
         ev = [f'Quote: "{q}"' for q in j.quotes[:3]]
@@ -165,10 +166,11 @@ def suggestion(code, j, **where):
             ev.append(f"{j.rejected_quotes} quote(s) from the model were not in the material and were ignored")
         if j.cut:
             ev.append("The material was longer than the model's limit and was shortened, so this may miss text at the end")
+        marks = [mark(q, f"model suggests {j.verdict.upper()}: {j.reason}", exact=False) for q in j.quotes[:3]]
     else:
         msg = f"[model-assisted] The model could not decide ({j.note})"
         ev = []
-    return result(code, REVIEW, msg, ev, method="model", **where)
+    return result(code, REVIEW, msg, ev, method="model", marks=marks, **where)
 
 
 def cached_chat(model, tag, system, user):

@@ -5,9 +5,19 @@ from collections import Counter
 from ..models import FAIL, NA, PASS, REVIEW, Finding
 
 
-def result(code, status, message="", evidence=None, partial=False, doc=None, lesson=None, chapter=None, method="deterministic"):
+def result(code, status, message="", evidence=None, partial=False, doc=None, lesson=None, chapter=None, method="deterministic",
+           marks=None):
     return Finding(code=code, status=status, message=message, evidence=list(evidence or []),
-                   partial=partial, doc=doc, lesson=lesson, chapter=chapter, method=method)
+                   partial=partial, doc=doc, lesson=lesson, chapter=chapter, method=method, marks=list(marks or []))
+
+
+def mark(text, note="", slide=None, exact=True):
+    """A place in the document to highlight. exact: `text` is a whole paragraph (one paragraph is
+    marked); otherwise it is a quote, and every paragraph it touches is marked."""
+    m = {"text": (text or "").strip(), "note": note, "exact": exact}
+    if slide is not None:
+        m["slide"] = slide
+    return m
 
 
 def canon_font(name):
