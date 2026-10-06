@@ -97,7 +97,7 @@ def test_fg2_copied_lesson_plan_text_fails(tmp_path):
     para = "The square root of a number is the value that, multiplied by itself, gives the original number, as in 7 times 7 equals 49."
     slides = [("Cover", ["x"], ""), ("Concept", [para, "Facilitator Notes: explain"], "")]
     r = fg2(tmp_path, slides, plan_paragraphs=[para])
-    assert r.status == FAIL and "repeat Lesson Plan paragraphs" in r.message
+    assert r.status == FAIL and "Lesson Plan paragraph(s) almost word for word" in r.message
 
 
 # ------------------------------------------------------------- citations

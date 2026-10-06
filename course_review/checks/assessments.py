@@ -61,12 +61,79 @@ def _slo_tag_present(ctx, text):
 # ----------------------------------------------------------------- Pop Quiz
 
 
+_TITLE_NOISE = re.compile(r"[\d\W_]+")
+
+
+def _title_words(text, drop):
+    words = {w for w in _TITLE_NOISE.split(to_western_digits(normalize(text)).lower()) if w}
+    return words - drop
+
+
+def _lesson_title_text(ctx, key):
+    """The opening text of the lesson's own documents (Lesson Plan first), where the lesson's name is written."""
+    docs = sorted((d for d in ctx.pkg.docs if d.key == key and d.ext in ("docx", "pptx") and not d.superseded),
+                  key=lambda d: (d.doc_type != "lesson_plan", d.doc_type != "facilitator_guide"))
+    texts = [docs[0].folder_label or ""] if docs else []
+    for d in docs[:2]:
+        info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
+        if info is None:
+            continue
+        if d.ext == "docx":
+            texts += [p.text for p in info.paras if p.text.strip()][:3]
+        elif info.slides_text:
+            st = info.slides_text[0]
+            texts += [st.title or ""] + list(st.texts)[:2]
+    return " ".join(texts)
+
+
+_STOP = {"کی", "کا", "کے", "اور", "و", "میں", "سے", "کو", "پر", "ہے", "the", "of", "and", "a", "in", "to"}
+
+
+def _match_groups_by_title(ctx, groups, pkg_keys):
+    """{chapter: group index}. Each package lesson votes for the Pop Quiz group whose section with
+    the same lesson number shares the most title words with the lesson's own opening text (a
+    unique best only); a chapter goes to the group most of its lessons voted for. Works when the
+    package holds only some chapters, or one lesson, and whatever way the title is written."""
+    drop = {normalize(w).lower() for w in ["lesson", "سبق", "باب", "chapter", "part"]} | _STOP
+    votes = defaultdict(Counter)
+    for ch, lessons in pkg_keys.items():
+        for num, var in lessons:
+            words = _title_words(_lesson_title_text(ctx, LessonKey(ch, num, var)), set())
+            scored = []
+            for gi, grp in enumerate(groups):
+                h = next((h for h in grp if h["num"] == num and (not var or h["variant"] == var)), None)
+                if h:
+                    tw = {w for w in _title_words(h["title"], drop) if len(w) > 1}
+                    scored.append((len(tw & words), gi))
+            scored.sort(reverse=True)
+            if scored and scored[0][0] >= 1 and (len(scored) == 1 or scored[0][0] > scored[1][0]):
+                votes[ch][scored[0][1]] += 1
+    chosen, used = {}, set()
+    for ch, c in sorted(votes.items(), key=lambda kv: -max(kv[1].values())):
+        (gi, n), *rest = c.most_common()
+        if gi not in used and (not rest or n > rest[0][1]):
+            chosen[ch] = gi
+            used.add(gi)
+    return chosen
+
+
 def align_pop_quiz(ctx):
     """Map each Pop Quiz lesson section to a package LessonKey.
 
-    Lesson numbers restart in each chapter, so sections form groups, and groups are
-    matched in order to the package's chapters that have lesson folders.
-    Returns ({LessonKey: [Question]}, info_or_None, problem_or_None)."""
+    Lesson numbers restart in each chapter, so sections form groups of lessons. A package
+    chapter is matched to the group whose lesson titles appear in that chapter's own lesson
+    documents; when titles say nothing and the counts agree, groups are matched in order.
+    Lessons that cannot be placed get a reason in the returned 'unplaced' dict.
+    Returns ({LessonKey: [Question]}, info_or_None, problem_or_None); cached per run."""
+    cache = ctx.__dict__.get("_pq_align")
+    if cache is not None:
+        return cache
+    ctx._pq_unplaced = {}
+    ctx._pq_align = out = _align_pop_quiz(ctx)
+    return out
+
+
+def _align_pop_quiz(ctx):
     pq = next((d for d in ctx.pkg.docs if d.doc_type == "pop_quiz" and not d.superseded), None)
     if pq is None:
         return {}, None, "No Pop Quiz document in the package"
@@ -74,19 +141,29 @@ def align_pop_quiz(ctx):
     if info is None:
         return {}, None, "The Pop Quiz could not be read"
     groups = segment_lessons(info, ctx.profile)
-    chapters = sorted({d.chapter for d in ctx.pkg.docs if d.lesson is not None and d.chapter is not None})
-    if len(groups) != len(chapters):
-        return {}, info, (f"Pop Quiz has {len(groups)} chapter group(s) but the package has {len(chapters)} chapter(s) with "
-                          f"lesson folders; sections could not be matched to lessons")
     pkg_keys = defaultdict(set)
     for d in ctx.pkg.docs:
         if d.lesson is not None and d.chapter is not None:
             pkg_keys[d.chapter].add((d.lesson, d.variant))
+    chapters = sorted(pkg_keys)
+    chosen = _match_groups_by_title(ctx, groups, pkg_keys)
+    if not chosen and len(groups) == len(chapters):
+        chosen = {ch: gi for gi, ch in enumerate(chapters)}
+    if not chosen:
+        return {}, info, (f"Pop Quiz has {len(groups)} chapter group(s); none of their lesson titles matched this package's "
+                          f"lesson documents, so its sections could not be matched to lessons")
+    for ch in chapters:
+        if ch not in chosen:
+            for num, var in pkg_keys[ch]:
+                ctx._pq_unplaced[LessonKey(ch, num, var)] = (
+                    "No Pop Quiz section's lesson titles matched this chapter's lesson documents, so its questions could not be found")
     mapping = {}
-    for ch, grp in zip(chapters, groups):
-        for h in grp:
+    for ch, gi in chosen.items():
+        for h in groups[gi]:
             variant = h["variant"] if (h["num"], h["variant"]) in pkg_keys[ch] else ""
             key = LessonKey(ch, h["num"], variant)
+            if (h["num"], variant) not in pkg_keys[ch]:
+                continue                  # a lesson the package does not contain
             qs = parse_questions(info, ctx.profile, h["start"] + 1, h["end"])
             if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
                 recovered, _ = recover_questions(info, ctx.model, pq, h["start"] + 1, h["end"])
@@ -109,6 +186,10 @@ def pop_quiz_checks(ctx):
         if problem:
             for code in ("PQ1", "PQ2", "PQ3", "PQ4"):
                 out.append(result(code, REVIEW, problem, lesson=key))
+            continue
+        if key in ctx._pq_unplaced:
+            for code in ("PQ1", "PQ2", "PQ3", "PQ4"):
+                out.append(result(code, REVIEW, ctx._pq_unplaced[key], lesson=key, doc=_pq_rel(ctx)))
             continue
         qs = mapping.get(key, [])
         if not qs and key.lesson is None:

@@ -5,9 +5,9 @@ from difflib import SequenceMatcher
 
 from ..models import FAIL, NA, PASS, REVIEW
 from ..textutil import normalize
-from .common import result
+from .common import mark, result
 
-COPY_MIN_CHARS = 80
+COPY_MIN_CHARS = 60
 COPY_SIMILARITY = 0.9
 
 
@@ -18,7 +18,13 @@ def _lesson_plan_paras(ctx, doc):
     info = ctx.docx(lp)
     if info is None:
         return None
-    return [normalize(p.text) for p in info.paras if len(p.text.strip()) >= COPY_MIN_CHARS]
+    # the SLOs are meant to be restated on the slides, so their paragraphs are not counted as copying
+    from .lessonplan import find_sections
+    found = find_sections(ctx, info)
+    start = found.get("slos")
+    later = [v for v in found.values() if v is not None and start is not None and v > start]
+    skip = range(start, min(later)) if start is not None and later else range(0)
+    return [normalize(p.text) for p in info.paras if len(p.text.strip()) >= COPY_MIN_CHARS and p.idx not in skip]
 
 
 def _has_facilitator_part(slide, labels):
@@ -34,21 +40,24 @@ def fg2(ctx, doc, info):
     labels = [normalize(x).lower() for x in ctx.profile["vocab"].get("facilitator_note_labels", [])]
     missing = [s.index for s in slides if not _has_facilitator_part(s, labels)]
     plan = _lesson_plan_paras(ctx, doc)
-    copied = []
+    copied, marks = [], []
     if plan:
+        # a text box holds several paragraphs, so compare it line by line with the plan's paragraphs
         for s in slides:
-            for t in s.texts:
-                nt = normalize(t)
-                if len(nt) < COPY_MIN_CHARS:
-                    continue
-                for pt in plan:
-                    if abs(len(pt) - len(nt)) <= 0.25 * len(nt) and SequenceMatcher(None, nt, pt).quick_ratio() >= COPY_SIMILARITY \
-                            and SequenceMatcher(None, nt, pt).ratio() >= COPY_SIMILARITY:
-                        copied.append(s.index)
-                        break
+            for t in s.texts + ([s.notes] if s.notes else []):
+                for line in t.split("\n"):
+                    nt = normalize(line).strip(" •-–—*")
+                    if len(nt) < COPY_MIN_CHARS:
+                        continue
+                    for pt in plan:
+                        if abs(len(pt) - len(nt)) <= 0.25 * len(nt) and SequenceMatcher(None, nt, pt).quick_ratio() >= COPY_SIMILARITY \
+                                and SequenceMatcher(None, nt, pt).ratio() >= COPY_SIMILARITY:
+                            copied.append(s.index)
+                            marks.append(mark(line, "copied word for word from the Lesson Plan", slide=s.index))
+                            break
     if copied:
-        msg = f"slide(s) {sorted(set(copied))} repeat Lesson Plan paragraphs almost word for word"
-        return result("FG2", FAIL, msg, [msg])
+        msg = f"slide(s) {sorted(set(copied))} repeat {len(copied)} Lesson Plan paragraph(s) almost word for word"
+        return result("FG2", FAIL, msg, [msg], marks=marks)
     if missing:
         msg = (f"No labelled facilitator-notes part and no speaker notes on slide(s) {missing}. The guide may mark facilitator notes "
                f"another way (labels looked for: {', '.join(ctx.profile['vocab']['facilitator_note_labels'][:3])}...), so a reviewer should look")

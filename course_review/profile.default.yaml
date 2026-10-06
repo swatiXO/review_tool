@@ -65,6 +65,8 @@ vocab:
   lesson_plan_location_labels: ["Lesson Plan Location"]      # add Urdu wording here when known
   feedback_labels: ["Correct feedback", "Incorrect feedback"] # add Urdu wording here when known
   answer_key_labels: ["Answer Key", "Answers", "جوابات", "جواب نامہ", "کلید جوابات"]
+  # lines that start with these are labels inside a question (answer, hint), never section headings
+  answer_line_labels: ["Answer", "Model answer", "Sample answer", "Hint", "مثالی جواب", "جواب", "اشارہ"]
   caption_prefixes:
     table: ["Table", "جدول"]
     figure: ["Figure", "Fig.", "شکل"]

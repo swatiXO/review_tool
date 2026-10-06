@@ -136,7 +136,8 @@ def coverage_findings(ctx):
         lesson_slos = slos_for(slos, key)
         entry = cov["lesson_q"].get(("pop_quiz", key))
         if cov["pq_problem"] or entry is None:
-            out.append(result("PQ5", REVIEW, cov["pq_problem"] or "No Pop Quiz questions for this lesson", lesson=key))
+            why = cov["pq_problem"] or getattr(ctx, "_pq_unplaced", {}).get(key) or "No Pop Quiz questions for this lesson"
+            out.append(result("PQ5", REVIEW, why, lesson=key))
             continue
         qs, tagged, idx = entry
         if not lesson_slos:

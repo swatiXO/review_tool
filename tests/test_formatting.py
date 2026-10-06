@@ -152,10 +152,22 @@ def test_we13_requires_builtin_heading_styles(tmp_path):
     d.add_heading("1 Real heading", 1)
     assert run("WE13", d, tmp_path).status == PASS
     d = new_doc()
+    add(d, "Document title", bold=True)
     add(d, "Looks like a heading", bold=True)
     add(d, "Body text that is a normal sentence and goes on for a while. It ends with a full stop.")
     r = run("WE13", d, tmp_path)
     assert r.status == FAIL and "Heading style" in r.message
+
+
+def test_title_question_labels_and_sublabels_are_not_headings(tmp_path):
+    d = new_doc()
+    add(d, "Assessment: Patience", bold=True)
+    add(d, "سوال ١ (کثیر الانتخابی)", bold=True)
+    add(d, "Some question text that is a sentence.")
+    add(d, "Knowledge:", bold=True)
+    add(d, "Question 2: pick one", bold=True)
+    assert run("WE12", d, tmp_path).status == NA
+    assert run("WE13", d, tmp_path).status == NA
 
 
 # captions, figures, tables --------------------------------------------------
@@ -198,6 +210,20 @@ def test_we23_colour_text_fails_grey_passes(tmp_path):
     d = new_doc()
     add(d, "Red text", color="FF0000")
     assert run("WE23", d, tmp_path).status == FAIL
+
+
+def test_we23_judges_visible_colour_not_unused_style_definitions(tmp_path):
+    d = new_doc()                                   # the default template defines blue Heading styles
+    add(d, "Plain black text")
+    assert run("WE23", d, tmp_path).status == PASS
+    d = new_doc()
+    d.add_heading("1 A heading in the template's blue Heading 1", 1)
+    assert run("WE23", d, tmp_path).status == FAIL
+    d = new_doc()
+    h = d.add_heading("1 Heading 1 overridden to black", 1)
+    for r in h.runs:
+        r.font.color.rgb = __import__("docx").shared.RGBColor(0, 0, 0)
+    assert run("WE23", d, tmp_path).status == PASS
 
 
 def test_we23_yellow_highlight_allowed_only_in_pop_quiz(tmp_path):

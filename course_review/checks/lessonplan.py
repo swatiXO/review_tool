@@ -59,8 +59,8 @@ def lp5(ctx, doc, info: DocxInfo):
         t = p.text.strip()
         if not t or p.in_table:
             continue
-        if re.search(r"[:：]$", t) and len(t) < 40:
-            continue  # a sub-label such as 'Knowledge:'
+        if re.search(r"[:：]$", t):
+            continue  # a sub-label such as 'Knowledge:' or a lead-in such as 'By the end you will be able to:'
         items.append(p)
     if not items:
         return result("LP5", REVIEW, "No SLO items found under the SLO heading")

@@ -292,9 +292,8 @@ def we23(ctx, doc, info):
                 if f and f.lower() not in ("auto", "ffffff") and not is_grey(f, th["colour_grey_tolerance"]) and not \
                         (exempt_highlight and is_yellow(f)):
                     found[f"table cell shading #{f}"] += 1
-        for name, (val, theme) in info.style_colors.items():
-            if val and val.lower() != "auto" and not _neutral(val, theme, th):
-                found[f"style '{name}' colour #{val}"] += 1
+        # Style definitions are not checked on their own: a coloured style shows up through the
+        # effective colour of the runs that use it, and an unused or overridden one is invisible.
     else:
         tmap = getattr(info, "theme", {})
         for r in info.runs:
@@ -325,24 +324,42 @@ def leading_number(text):
     return tuple(int(x) for x in m.group(1).split(".")) if m else None
 
 
+def _is_question_label(ctx, t):
+    from ..questions import question_regex
+    rx = ctx.__dict__.setdefault("_qlabel_rx", question_regex(ctx.profile, labelled=True))
+    return bool(rx.match(to_western_digits(normalize(t))))
+
+
 def heading_like(ctx, p):
     if p.in_table or not p.text.strip() or p.in_toc:
         return False
     if p.is_title:
         return False
+    t = p.text.strip()
+    if _is_question_label(ctx, t):
+        return False                  # 'سوال ١ (...)' / 'Question 3:' is a question, not a section heading
+    nt = normalize(t).lower()
+    if any(nt.startswith(normalize(l).lower()) for l in ctx.profile["vocab"].get("answer_line_labels", [])):
+        return False                  # 'Model answer: ...' inside a question
     if p.heading_level:
         return True
-    t = p.text.strip()
     if len(t) > 90 or p.list_kind:
         return False
     from ..textutil import starts_with_label
     if starts_with_label(t, ctx.section_labels):
         return True
-    return p.all_bold and not re.search(r"[.!?؟۔]$", t)
+    return p.all_bold and not re.search(r"[.!?؟۔:：]$", t)     # not a sentence, not a 'Knowledge:' sub-label
+
+
+def doc_headings(ctx, info: DocxInfo):
+    """Section headings. The document's opening line is its title, not a numbered heading,
+    unless it is set in a Heading style."""
+    first = next((p for p in info.paras if p.text.strip() and not p.in_table), None)
+    return [p for p in info.paras if heading_like(ctx, p) and not (p is first and not p.heading_level)]
 
 
 def we12(ctx, doc, info: DocxInfo):
-    heads = [p for p in info.paras if heading_like(ctx, p)]
+    heads = doc_headings(ctx, info)
     if not heads:
         return result("WE12", NA, "No headings found")
     seqs, unnumbered, ev, marks = [], [], [], []
@@ -382,7 +399,7 @@ def we12(ctx, doc, info: DocxInfo):
 
 
 def we13(ctx, doc, info: DocxInfo):
-    heads = [p for p in info.paras if heading_like(ctx, p)]
+    heads = doc_headings(ctx, info)
     if not heads:
         return result("WE13", NA, "No headings found")
     fake = [p for p in heads if not p.heading_level]
@@ -393,12 +410,36 @@ def we13(ctx, doc, info: DocxInfo):
     return result("WE13", PASS, "All headings use built-in Heading styles")
 
 
+def estimate_pages(info: DocxInfo):
+    """A deliberately low page estimate from text length and size (on real Urdu lesson plans it gave
+    55-65% of the true count), used only when the file does not record its page count."""
+    import math
+    if len(info.margins_in) == 4 and info.page_w_in and info.page_h_in:
+        w = (info.page_w_in - info.margins_in[2] - info.margins_in[3]) * 72
+        h = (info.page_h_in - info.margins_in[0] - info.margins_in[1]) * 72
+    else:
+        w, h = 6.5 * 72, 9 * 72
+    total = 0.0
+    for p in info.paras:
+        if not p.text.strip():
+            continue
+        sz = max((r.size for r in p.runs if r.size), default=11)
+        per_line = max(1.0, w / (sz * 0.45))
+        nastaliq = any(r.script == "arabic" for r in p.runs)
+        total += max(1, math.ceil(len(p.text) / per_line)) * sz * (1.8 if nastaliq else 1.2)
+    return total / h if h > 0 else 0.0
+
+
 def we15(ctx, doc, info: DocxInfo):
     if doc.doc_type != "lesson_plan":
         return result("WE15", NA, "Only applies to Lesson Plans")
     if info.has_toc:
         return result("WE15", PASS, "Table of Contents present")
     if info.pages is None:
+        est = estimate_pages(info)
+        if est >= 3:
+            return result("WE15", FAIL, f"No Table of Contents, and the document runs to at least {int(est)} pages "
+                                        "(estimated from its text; the file does not record a page count)")
         return result("WE15", REVIEW, "No Table of Contents, and the file does not record its page count, so 'longer than two pages' cannot be decided")
     if info.pages > 2:
         return result("WE15", FAIL, f"{info.pages} pages and no Table of Contents")

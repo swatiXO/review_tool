@@ -14,6 +14,8 @@ _LETTER_MAP = {
     0x0649: 0x06CC,  # alef maksura -> yeh
     0x0643: 0x06A9,  # Arabic kaf -> keheh
     0x0647: 0x06C1,  # Arabic heh -> heh goal
+    0x06C2: 0x06C1,  # heh goal with hamza (غزوۂ) -> heh goal
+    0x06C0: 0x06C1,  # heh with yeh above -> heh goal
 }
 _STRIP = re.compile(
     "[ً-ٰٟۖ-ۜ۟-۪ۨ-ۭـ"
