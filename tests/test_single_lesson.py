@@ -5,6 +5,7 @@ import json
 from course_review import cli
 
 from helpers import add, checklist, new_doc, zip_dir
+from test_fallback import package_with_roman_pop_quiz
 
 
 def test_one_lesson_package_finds_its_pop_quiz_section(tmp_path):
@@ -52,3 +53,11 @@ def test_loose_lesson_files_without_folders_keep_their_lesson_and_no_chapter_exa
     assert [d["lesson"] for d in r["inventory"]["documents"]] == ["2"]
     ws1 = [f for f in r["findings"] if f["code"] == "WS1"]
     assert ws1 and all(f["status"] == "needs_review" for f in ws1)
+
+
+def test_the_teams_checklist_is_built_in(tmp_path):
+    import os
+    assert os.path.exists(cli.BUILTIN_CHECKLIST)
+    out = tmp_path / "out"
+    cli.review(str(package_with_roman_pop_quiz(tmp_path)), cli.default_checklist(), str(out))
+    assert (out / "Course-Review-Checklist-filled.xlsx").exists()

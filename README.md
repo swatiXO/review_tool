@@ -9,14 +9,17 @@ nothing is overridden. The Grade 6 Islamiat zip is only an example of a package.
 
 ## Quick start
 
+The team's Course Review Checklist is built in (`course_review/data/Course-Review-Checklist.xlsx`). Pass `--checklist` (or set `COURSE_REVIEW_CHECKLIST`) only to use a different workbook; replace the built-in file when the checklist is updated.
+
+
 ```bash
 pip install -r requirements.txt
 
 # the web page: upload a zip, watch progress, download the results
-python -m course_review.cli serve --checklist Course-Review-Checklist.xlsx      # http://127.0.0.1:8080
+python -m course_review.cli serve       # http://127.0.0.1:8080
 
 # or the command line
-python -m course_review.cli review PACKAGE.zip --checklist Course-Review-Checklist.xlsx --out review-output
+python -m course_review.cli review PACKAGE.zip  --out review-output
 ```
 
 | Output | What it is |

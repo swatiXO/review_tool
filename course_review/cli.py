@@ -1,6 +1,6 @@
 """Command line.
 
-  python -m course_review.cli review PACKAGE.zip --checklist Course-Review-Checklist.xlsx --out out/
+  python -m course_review.cli review PACKAGE.zip --out out/      (the team's checklist is built in; --checklist overrides it)
   python -m course_review.cli review ... --model-fallback suggest --model-url https://abcd.ngrok-free.dev
   python -m course_review.cli check-model --model-url https://abcd.ngrok-free.dev
   python -m course_review.cli eval-model PACKAGE.zip --model-url https://abcd.ngrok-free.dev
@@ -33,6 +33,14 @@ def make_model(mode, url=None, model=None, cache_dir=".course_review_cache", jud
 
 
 MARKED_UP = "Marked-up-documents.zip"
+
+
+# The team's Course Review Checklist ships with the tool; --checklist (or COURSE_REVIEW_CHECKLIST) overrides it.
+BUILTIN_CHECKLIST = str(Path(__file__).parent / "data" / "Course-Review-Checklist.xlsx")
+
+
+def default_checklist():
+    return os.environ.get("COURSE_REVIEW_CHECKLIST") or BUILTIN_CHECKLIST
 
 
 def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None, progress=None):
@@ -69,7 +77,7 @@ def main(argv=None):
 
     r = sub.add_parser("review", help="review a course package zip against the checklist workbook")
     r.add_argument("package", help="the .zip to review")
-    r.add_argument("--checklist", required=True, help="Course-Review-Checklist.xlsx (the rules)")
+    r.add_argument("--checklist", default=None, help="checklist workbook (default: the built-in Course-Review-Checklist.xlsx)")
     r.add_argument("--out", default="review-output", help="output folder")
     r.add_argument("--profile", help="package profile YAML (defaults to the built-in one)")
     r.add_argument("--model-fallback", choices=["off", "suggest", "decide"], default="off",
@@ -92,7 +100,7 @@ def main(argv=None):
     _model_args(b)
 
     sv = sub.add_parser("serve", help="run the web page (upload a zip, download the results)")
-    sv.add_argument("--checklist", default=os.environ.get("COURSE_REVIEW_CHECKLIST"), help="default checklist workbook (or set COURSE_REVIEW_CHECKLIST)")
+    sv.add_argument("--checklist", default=None, help="checklist workbook (default: the built-in one, or COURSE_REVIEW_CHECKLIST)")
     sv.add_argument("--host", default="127.0.0.1", help="127.0.0.1 keeps it on this computer (default)")
     sv.add_argument("--port", type=int, default=8080)
     sv.add_argument("--jobs-dir", default="web_jobs")
@@ -119,7 +127,7 @@ def main(argv=None):
 
     if a.cmd == "serve":
         from . import web
-        web.serve(a.checklist, a.host, a.port, a.jobs_dir, a.books_dir)
+        web.serve(a.checklist or default_checklist(), a.host, a.port, a.jobs_dir, a.books_dir)
         return
 
     if a.cmd == "learn-format":
@@ -181,7 +189,7 @@ def main(argv=None):
         from .book import BookIndex
         book_index = BookIndex.load(a.book_index)
         print(f"Textbook index: {len(book_index.pages)} page(s) from {a.book_index}")
-    pkg, res, xlsx, secs = review(a.package, a.checklist, a.out, a.profile, model=model, book=book_index)
+    pkg, res, xlsx, secs = review(a.package, a.checklist or default_checklist(), a.out, a.profile, model=model, book=book_index)
     c = Counter(f.status for f in res.findings)
     print(f"Reviewed {len(pkg.docs)} documents in {secs:.0f}s: {c['fail']} fails, {c['pass']} passes, "
           f"{c['needs_review']} need review, {c['na']} n/a")
