@@ -311,7 +311,8 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                         m = re.match(r"(.*)-v(\d+(?:\.\d+)*)$", base)
                         autofix.add_footer(src, m.group(1) if m else base, m.group(2) if m else "0.1")
                         fixed_lines.append("Footer added: document name, version, date, page number")
-                    fs = [f for f in fs if not autofix.settled(f, d.ext, d.doc_type, extra)]
+                    rel = (d.rel.rsplit("/", 1)[0] + "/" if "/" in d.rel else "") + dst.name
+                    fs = autofix.remaining(fs, d.ext, autofix.recheck(ctx, d, src, rel), extra)
                 n = (annotate_docx if d.ext == "docx" else annotate_pptx)(src, dst, fs, fixed_lines)
                 stats["documents"] += 1
                 stats["paragraphs"] += n

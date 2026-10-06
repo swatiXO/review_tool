@@ -67,3 +67,42 @@ def test_check_mark_becomes_a_yellow_highlight_and_lesson_sections_still_split(t
     pq = {f["code"]: f for f in r["findings"] if f["lesson"] == "Ch4-L2" and f["code"].startswith("PQ")}
     assert pq["PQ1"]["status"] in ("pass", "fail") and "Pop Quiz has" not in pq["PQ1"]["message"]
     assert pq["PQ4"]["status"] == "pass"
+
+
+def test_only_a_fail_the_fixed_copy_no_longer_shows_is_left_out():
+    from course_review import autofix
+    from course_review.checks.common import result
+    fs = [result("LP5", "needs_review", "The SLO section was not found"),       # not a Fail: never hidden
+          result("WE4", "fail", "Letter size"),                                 # fixed: the copy passes
+          result("WE3", "fail", "No version number"),                           # the copy still needs a person
+          result("WE8", "fail", "Body text is 11 pt"),                          # the copy still fails
+          result("WE21", "fail", "Citation is not (Author, Year)"),             # not a code the fixer works on
+          result("LP10", "fail", "WE4 fails")]                                  # derived: WE8 still fails on the copy
+    for f in fs:
+        f.doc = "Lesson-Plan.docx"
+    after = {"LP5": result("LP5", "needs_review", "The SLO section was not found"),
+             "WE4": result("WE4", "pass", "A4"), "WE3": result("WE3", "needs_review", "Version v0.1 is present"),
+             "WE8": result("WE8", "fail", "Body text is 10 pt"), "WE21": result("WE21", "pass", "fine"),
+             **{c: result(c, "pass", "") for c in ("WE1", "WE2", "WE6", "WE7")}}
+    kept = autofix.remaining(fs, "docx", after, {})
+    assert [(f.code, f.status, f.message) for f in kept] == [
+        ("LP5", "needs_review", "The SLO section was not found"),
+        ("WE3", "needs_review", "Version v0.1 is present"),
+        ("WE8", "fail", "Body text is 10 pt"),
+        ("WE21", "fail", "Citation is not (Author, Year)"),
+        ("LP10", "fail", "WE4 fails")]
+    assert all(f.doc == "Lesson-Plan.docx" for f in kept)
+    # a copy that could not be re-checked clears nothing
+    assert autofix.remaining(fs, "docx", {}, {}) == fs
+
+
+def test_fixed_copy_still_asks_about_what_the_fix_cannot_decide(tmp_path):
+    from docx import Document
+    out = tmp_path / "o"
+    cli.review(package(tmp_path), str(checklist(tmp_path)), str(out))
+    z = zipfile.ZipFile(out / cli.MARKED_UP)
+    name = next(n for n in z.namelist() if n.endswith("Lesson-Plan-Lesson-2-Chapter-4-v0.1.docx"))
+    z.extract(name, tmp_path / "x")
+    text = "\n".join(c.text for c in Document(str(tmp_path / "x" / name)).comments)
+    assert "WE3 CHECK" in text                 # the version the tool wrote must still be confirmed by a person
+    assert "WE4 FAIL" not in text and "WE8 FAIL" not in text
