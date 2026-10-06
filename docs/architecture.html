@@ -1,0 +1,366 @@
+<title>Course Review Tool Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: single reading column (max 52rem) with a sticky section index; diagrams and tables scroll inside their own frames. */
+:root {
+  --bg: #F5F7F9;
+  --surface: #FFFFFF;
+  --surface-2: #EDF1F4;
+  --fg: #14202B;
+  --muted: #566472;
+  --line: #D5DCE3;
+  --accent: #0B6B73;
+  --code: #0B6B73;
+  --ai: #A15C07;
+  --human: #5B4B9A;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1519; --surface: #151E24; --surface-2: #1B262D; --fg: #E3EAF0; --muted: #93A2AE;
+    --line: #27333B; --accent: #4CC3CC; --code: #4CC3CC; --ai: #E3A04A; --human: #A99BE0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1519; --surface: #151E24; --surface-2: #1B262D; --fg: #E3EAF0; --muted: #93A2AE;
+  --line: #27333B; --accent: #4CC3CC; --code: #4CC3CC; --ai: #E3A04A; --human: #A99BE0;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.6; padding-inline: 16px; padding-block: 28px 64px; }
+.wrap { max-width: 52rem; margin-inline: auto; display: flex; flex-direction: column; gap: 40px; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: 2rem; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 1.3rem; font-weight: 600; }
+h3 { font-size: 1rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+a { color: var(--accent); }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, pre { font-family: var(--font-mono); font-size: 0.85em; }
+:not(pre) > code { background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 3px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.05rem; color: var(--muted); }
+header { display: flex; flex-direction: column; gap: 12px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.status { display: inline-flex; gap: 8px; align-items: center; font-size: 0.82rem; color: var(--muted); }
+.status b { color: var(--ai); font-weight: 600; }
+nav { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.85rem; }
+section { display: flex; flex-direction: column; gap: 16px; scroll-margin-top: 16px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 16px; }
+.cols > div { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.tag { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+.t-code { color: var(--code); } .t-ai { color: var(--ai); } .t-human { color: var(--human); }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 34rem; font-size: 0.88rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; font-weight: 500; }
+pre { margin: 0; padding: 14px 16px; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; line-height: 1.55; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+figcaption { font-size: 0.85rem; color: var(--muted); max-width: 68ch; }
+.fig { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 12px; }
+.fig svg { display: block; min-width: 760px; width: 100%; height: auto; color: var(--fg); }
+svg text { fill: currentColor; font-family: var(--font-body); font-size: 12px; }
+svg .t { font-weight: 600; font-size: 13px; }
+svg .s { font-size: 11px; fill: var(--muted); }
+svg .lbl { font-size: 11px; fill: var(--muted); font-family: var(--font-mono); }
+svg .node { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.2; }
+svg .frame { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .ln { stroke: currentColor; stroke-width: 1.4; fill: none; }
+svg .dash { stroke-dasharray: 4 4; opacity: 0.7; }
+svg .l-code { fill: var(--surface); stroke: var(--code); stroke-width: 1.8; }
+svg .l-ai { fill: var(--surface); stroke: var(--ai); stroke-width: 1.8; }
+svg .l-human { fill: var(--surface); stroke: var(--human); stroke-width: 1.8; }
+svg .ext { fill: var(--surface); stroke: currentColor; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.note { padding: 12px 16px; border-left: 3px solid var(--ai); background: var(--surface); border-radius: 0 6px 6px 0; font-size: 0.9rem; }
+ul { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 6px; max-width: 68ch; }
+.pill { display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; font-weight: 500; }
+@media (max-width: 520px) { h1 { font-size: 1.6rem; } }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+
+<header>
+  <span class="eyebrow">Design proposal · v0.5 · built, model accuracy being measured</span>
+  <h1>Course Review Tool Architecture</h1>
+  <p class="lede">A standalone service that takes a course-package zip (Grade 6 Islamiat is the reference sample), runs the Course Review Checklist against it, entirely offline, and returns a filled-in checklist workbook with evidence for every Fail.</p>
+  <span class="status"><b>Status:</b> architecture for engineering review. All product decisions are recorded in section 11. The checklist workbook is followed as written. It is built at <code>D:\Mediatiz\course_review_tool</code>: command line and a local web page, SLO coverage, model-assisted checks, a textbook index and format learning, with over 150 offline tests. How accurate the model is on Urdu is being measured against a real Ollama host.</span>
+  <nav aria-label="Sections">
+    <a href="#context">Context</a><a href="#system">System</a><a href="#ingest">Ingest</a><a href="#model">Data model</a><a href="#rules">Rule engine</a><a href="#ai">AI checks</a><a href="#output">Output</a><a href="#stack">Stack</a><a href="#ops">Ops &amp; security</a><a href="#phases">Phases</a><a href="#open">Decisions</a>
+  </nav>
+</header>
+
+<section id="context">
+  <h2>1. Context and scope</h2>
+  <p>Reviewers currently fill a spreadsheet by hand: one row per lesson, one column per checklist code (LP1 to LP10, FG1 to FG8, PQ1 to PQ5 and so on), each cell Pass, Fail or N/A. The tool automates as much of that as is defensible and leaves a clearly marked remainder for a person.</p>
+  <h3>Input: what a package looks like</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Level</th><th>Artifacts</th><th>Format</th></tr></thead>
+    <tbody>
+      <tr><td>Per lesson</td><td>Lesson Plan, Assessment (6 questions), Video Storyboard, Facilitator Guide</td><td>docx, docx, docx, pptx</td></tr>
+      <tr><td>Per chapter</td><td>Chapter Exam (20 questions)</td><td>docx</td></tr>
+      <tr><td>Per subject</td><td>Pop Quiz (all lessons in one file), Data Bank (multiple versions), Document of Specifications, textbook</td><td>docx, docx, docx, pdf</td></tr>
+    </tbody>
+  </table></div>
+  <p>This Grade 6 Islamiat package (126 files, 81 MB, Urdu, right-to-left) is only an example of the input. Nothing in the tool may be hard-coded to it: subject, language, number of chapters and file names all vary. The folder tree is the primary structure signal, but even here it is inconsistent (<code>Chpater-7</code>, <code>Lesson Plan.docx</code> with a space, a Chapter 1 with no lesson folders), so ingest must tolerate that and report what it could not place.</p>
+  <h3>Goals and non-goals</h3>
+  <div class="cols">
+    <div><span class="tag t-code">Goals</span><ul><li>Any subject or grade in this folder shape, not just Islamiat.</li><li>The checklist workbook is the rule source and is followed as written.</li><li>Runs fully offline, with a local Ollama as the only model.</li><li>Every result carries evidence a reviewer can check.</li></ul></div>
+    <div><span class="tag t-ai">Non-goals</span><ul><li>Not an authoring tool; it never edits the package.</li><li>No silent AI Pass. Judgement checks are suggestions.</li><li>No cloud model and no cloud services.</li><li>No judgement of subject-matter correctness.</li></ul></div>
+  </div>
+</section>
+
+<section id="system">
+  <h2>2. System overview</h2>
+  <figure>
+    <div class="fig">
+<svg viewBox="0 0 1000 440" role="img" aria-label="Pipeline from zip upload through ingest, parsing, a three-lane check engine and aggregation to three outputs, with a job store, rule registry and external LLM provider.">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+
+  <rect class="node" x="10" y="150" width="90" height="100" rx="6"/>
+  <text class="t" x="55" y="195" text-anchor="middle">Upload</text><text class="s" x="55" y="212" text-anchor="middle">.zip</text>
+
+  <rect class="node" x="150" y="150" width="130" height="100" rx="6"/>
+  <text class="t" x="215" y="190" text-anchor="middle">Ingest</text>
+  <text class="s" x="215" y="208" text-anchor="middle">safe unzip</text><text class="s" x="215" y="222" text-anchor="middle">classify files</text>
+
+  <rect class="node" x="330" y="150" width="130" height="100" rx="6"/>
+  <text class="t" x="395" y="190" text-anchor="middle">Parse</text>
+  <text class="s" x="395" y="208" text-anchor="middle">docx · pptx · pdf</text><text class="s" x="395" y="222" text-anchor="middle">to one model</text>
+
+  <rect class="frame" x="510" y="70" width="190" height="290" rx="8"/>
+  <text class="t" x="605" y="346" text-anchor="middle">Check engine</text>
+  <rect class="l-ai" x="522" y="85" width="166" height="90" rx="6"/>
+  <text class="t" x="605" y="118" text-anchor="middle">AI agent checks</text><text class="s" x="605" y="136" text-anchor="middle">~30 codes · suggest only</text><text class="s" x="605" y="152" text-anchor="middle">quotes verified in code</text>
+  <rect class="l-code" x="522" y="185" width="166" height="70" rx="6"/>
+  <text class="t" x="605" y="213" text-anchor="middle">Deterministic checks</text><text class="s" x="605" y="232" text-anchor="middle">~25 codes · Pass / Fail</text>
+  <rect class="l-human" x="522" y="265" width="166" height="60" rx="6"/>
+  <text class="t" x="605" y="291" text-anchor="middle">Reviewer-only flags</text><text class="s" x="605" y="308" text-anchor="middle">~6 codes · needs review</text>
+
+  <rect class="node" x="750" y="150" width="100" height="100" rx="6"/>
+  <text class="t" x="800" y="195" text-anchor="middle">Aggregate</text><text class="s" x="800" y="212" text-anchor="middle">findings table</text>
+
+  <rect class="node" x="900" y="95" width="90" height="55" rx="6"/><text class="s" x="945" y="119" text-anchor="middle">Checklist</text><text class="s" x="945" y="133" text-anchor="middle">.xlsx</text>
+  <rect class="node" x="900" y="172" width="90" height="55" rx="6"/><text class="s" x="945" y="196" text-anchor="middle">HTML</text><text class="s" x="945" y="210" text-anchor="middle">report</text>
+  <rect class="node" x="900" y="250" width="90" height="55" rx="6"/><text class="s" x="945" y="274" text-anchor="middle">JSON</text><text class="s" x="945" y="288" text-anchor="middle">API result</text>
+
+  <rect class="ext" x="530" y="6" width="150" height="40" rx="6"/>
+  <text class="t" x="605" y="23" text-anchor="middle">Ollama (local)</text><text class="s" x="605" y="38" text-anchor="middle">or via ngrok tunnel</text>
+
+  <rect class="node" x="150" y="385" width="310" height="42" rx="6"/>
+  <text class="t" x="305" y="403" text-anchor="middle">Job store</text><text class="s" x="305" y="418" text-anchor="middle">SQLite + per-job workspace on disk</text>
+  <rect class="node" x="510" y="385" width="190" height="42" rx="6"/>
+  <text class="t" x="605" y="403" text-anchor="middle">Rule registry</text><text class="s" x="605" y="418" text-anchor="middle">checklist .xlsx + YAML bindings</text>
+
+  <line class="ln" x1="100" y1="200" x2="148" y2="200" marker-end="url(#arr)"/><text class="lbl" x="124" y="192" text-anchor="middle">zip</text>
+  <line class="ln" x1="280" y1="200" x2="328" y2="200" marker-end="url(#arr)"/><text class="lbl" x="304" y="192" text-anchor="middle">tree</text>
+  <line class="ln" x1="460" y1="200" x2="508" y2="200" marker-end="url(#arr)"/><text class="lbl" x="484" y="192" text-anchor="middle">docs</text>
+  <line class="ln" x1="700" y1="200" x2="748" y2="200" marker-end="url(#arr)"/><text class="lbl" x="724" y="192" text-anchor="middle">results</text>
+  <line class="ln" x1="850" y1="185" x2="898" y2="125" marker-end="url(#arr)"/>
+  <line class="ln" x1="850" y1="200" x2="898" y2="200" marker-end="url(#arr)"/>
+  <line class="ln" x1="850" y1="215" x2="898" y2="275" marker-end="url(#arr)"/>
+  <line class="ln" x1="605" y1="46" x2="605" y2="83" marker-end="url(#arr)"/><text class="lbl" x="614" y="66">prompts</text>
+  <line class="ln" x1="605" y1="385" x2="605" y2="362" marker-end="url(#arr)"/><text class="lbl" x="614" y="378">rules</text>
+  <line class="ln dash" x1="215" y1="250" x2="215" y2="383" marker-end="url(#arr)"/><text class="lbl" x="223" y="330">files</text>
+  <line class="ln dash" x1="395" y1="250" x2="395" y2="383" marker-end="url(#arr)"/><text class="lbl" x="403" y="330">parsed JSON</text>
+</svg>
+    </div>
+    <figcaption>One job moves left to right. Parsing happens once and is cached; the check engine only reads the parsed model, never the original files. The rule registry is built from the checklist workbook itself and decides which of the three lanes each code runs in. The only external call is to Ollama.</figcaption>
+  </figure>
+  <div class="cols">
+    <div><span class="tag t-code">Deterministic</span><p>Code reads styles, sizes, counts and structure and can be exact. Page setup, fonts, colour, heading numbering, footers, question counts, section order.</p></div>
+    <div><span class="tag t-ai">AI judgement</span><p>Needs reading comprehension. SLO coverage, scope creep, story continuity, warm-up quality, feedback quality. Returns a suggestion plus quoted evidence.</p></div>
+    <div><span class="tag t-human">Reviewer only</span><p>Not reliably automatable. Logo placement, screenshots with browser chrome, fidelity to the book. Always emitted as <span class="pill">needs_review</span>.</p></div>
+  </div>
+</section>
+
+<section id="ingest">
+  <h2>3. Ingest and parsing</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Stage</th><th>Responsibility</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Safe unzip</td><td>Extract into a per-job workspace.</td><td>Reject path traversal (zip-slip), cap total size, file count and compression ratio, ignore macros and executables.</td></tr>
+      <tr><td>Classify</td><td>Map every file to <code>subject / chapter / lesson / doc_type</code>.</td><td>Patterns come from a package profile (glob and regex per doc type), not from code. Folder names first, filename second, content sniffing last. Files it cannot place are listed, and the reviewer can assign them in the UI before the run starts.</td></tr>
+      <tr><td>Inventory</td><td>Compare found files with what the checklist expects per lesson and chapter.</td><td>Missing and duplicate artifacts become findings, for example two Data Bank versions in one package.</td></tr>
+      <tr><td>Parse</td><td>Convert each file to the <em>Normalized Document Model</em>.</td><td>python-docx and python-pptx for structure and run formatting, PyMuPDF for the textbook. Parsed once, cached as JSON keyed by file hash.</td></tr>
+      <tr><td>Segment</td><td>Split multi-lesson files (the Pop Quiz and Data Bank are single files) into per-lesson parts.</td><td>By heading pattern ("سبق N") with a configurable regex per doc type.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Language is a first-class property of a document, not an afterthought: each document records its language, whether it is right-to-left, and which fonts it uses for complex script. The Urdu rules (WE7, WE10, WE11) read these fields directly.</p>
+  <p>Which document answers which checklist sheet (Lesson Plan, Facilitator's Guide, Pop Quiz, Chapter Exam, Worksheet, Data Bank) is a binding in the profile, because folder and file names do not settle it. Section 11 shows a case where the names and the workbook disagree.</p>
+</section>
+
+<section id="model">
+  <h2>4. Data model</h2>
+  <p>Checks never touch python-docx or python-pptx objects. They read one normalized model, so a new file format needs a new parser and no new rules.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Entity</th><th>Key fields</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Package</td><td><code>subject, grade, language, files[], unclassified[]</code></td><td>Root of a job. Holds the classified tree.</td></tr>
+      <tr><td>Document</td><td><code>doc_type, scope, path, hash, page_setup, footer, blocks[]</code></td><td>One parsed file.</td></tr>
+      <tr><td>Block</td><td><code>kind (heading|para|table|image|slide), text, level, number, style, runs[]</code></td><td>Ordered content. <code>runs[]</code> carry font name, complex-script font, size, bold, italic, colour, highlight, rtl.</td></tr>
+      <tr><td>Slide</td><td><code>layout, shapes[], notes</code></td><td>Facilitator Guide pages, with on-slide text and notes kept separate for FG2 and FG4.</td></tr>
+      <tr><td>SLO</td><td><code>code, text, lesson, source_doc</code></td><td>Official list from the Document of Specifications. The reference for every coverage check.</td></tr>
+      <tr><td>Question</td><td><code>doc, lesson, type, options[], correct_marker, slo_tag, level</code></td><td>Extracted from the Pop Quiz, Assessment, Chapter Exam and Data Bank.</td></tr>
+      <tr><td>Finding</td><td><code>rule_code, target (lesson | chapter | subject), status, method, evidence[], message</code></td><td>One result. Status is <span class="pill">pass</span> <span class="pill">fail</span> <span class="pill">na</span> or <span class="pill">needs_review</span>.</td></tr>
+      <tr><td>Override</td><td><code>finding_id, reviewer, status, comment, at</code></td><td>Human decision. Never overwrites the original finding, so agreement with the AI can be measured.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="rules">
+  <h2>5. Rule engine</h2>
+  <p>The checklist workbook is the rule source. At start-up the engine reads the Key sheet (code, scope, wording) and the matrix sheets (which codes belong to which output), so every report cites the reviewer's own wording and records which workbook version was used. A YAML binding attaches an implementation to each code. A code with no binding is reported as <span class="pill">not automated</span>, never skipped silently, and an edited workbook needs no code change unless it introduces a new kind of check.</p>
+<pre><code>- code: PQ1
+  doc_type: pop_quiz
+  target: lesson            # fills the Pop Quiz sheet, one row per lesson
+  kind: deterministic       # deterministic | ai | human
+  check: question_count
+  params: { min: 2, max: 3, allowed_types: [mcq] }
+  fail_message: "Lesson {lesson}: {n} questions, {bad_types} not MCQ"
+
+- code: LP1
+  doc_type: lesson_plan
+  target: lesson
+  kind: ai
+  check: slo_coverage
+  inputs: { slos: spec.slos[lesson], section: concept_building }
+  fail_message: "SLO not covered: {slo}"
+
+- code: PQ4
+  doc_type: pop_quiz
+  target: lesson
+  kind: deterministic
+  check: correct_answer_highlight
+  params: { colour: yellow, accept: [run_highlight, cell_shading] }
+  fail_message: "Lesson {lesson}: Q{q} correct option is not highlighted yellow"</code></pre>
+  <ul>
+    <li>A check is a pure function from parsed documents and params to a list of <code>Finding</code>. No I/O, so each one is unit-testable against a tiny fixture file.</li>
+    <li>Rules that are unsatisfiable on this package return <span class="pill">na</span> with a reason, rather than a false Fail. Example: DB1 when the package has no Data Bank for that lesson.</li>
+    <li>The formatting rules (WE1 to WE25) apply to every document as written, with no language exemption. An Urdu document set in Noto Nastaliq Urdu fails WE7, and a US Letter page fails WE4.</li>
+    <li>"Highlighted" means a real yellow run highlight or yellow cell shading on the correct option. A check-mark emoji beside it fails PQ4 and DB4.</li>
+    <li>Where the team deliberately departs from the workbook, the profile can override a rule parameter. Every override is printed at the top of the report (for example <em>DB1: 4 to 6 items became 5 to 8</em>). No overrides are used today, so the workbook stays the authority and the departure stays visible.</li>
+  </ul>
+  <div class="note"><b>Workbook followed as written.</b> Chapter Exam is per lesson and Worksheet is per chapter, and the Data Bank rule is 4 to 6 MCQ lower-order items per lesson, exactly as the workbook defines them. Files are bound to sheets by scope, not by file name (section 11).</div>
+</section>
+
+<section id="ai">
+  <h2>6. AI checks and the agent loop</h2>
+  <p>AI checks run as a bounded tool-using agent per (rule, target). It does not get the whole package in one prompt. It asks for what it needs, answers in a fixed schema, and its quotes are verified by code before anything is stored.</p>
+  <figure>
+    <div class="fig">
+<svg viewBox="0 0 940 190" role="img" aria-label="Agent loop: rule and scope, context tools, LLM verdict, evidence check, finding. A failed evidence check loops back to the LLM verdict up to twice.">
+  <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+  <rect class="node" x="10" y="45" width="150" height="70" rx="6"/><text class="t" x="85" y="76" text-anchor="middle">Rule + scope</text><text class="s" x="85" y="94" text-anchor="middle">LP1 · Lesson 4</text>
+  <rect class="l-ai" x="200" y="45" width="150" height="70" rx="6"/><text class="t" x="275" y="76" text-anchor="middle">Context tools</text><text class="s" x="275" y="94" text-anchor="middle">read-only, scoped</text>
+  <rect class="l-ai" x="390" y="45" width="150" height="70" rx="6"/><text class="t" x="465" y="76" text-anchor="middle">LLM verdict</text><text class="s" x="465" y="94" text-anchor="middle">JSON schema</text>
+  <rect class="l-code" x="580" y="45" width="150" height="70" rx="6"/><text class="t" x="655" y="76" text-anchor="middle">Evidence check</text><text class="s" x="655" y="94" text-anchor="middle">plain code</text>
+  <rect class="l-human" x="770" y="45" width="150" height="70" rx="6"/><text class="t" x="845" y="76" text-anchor="middle">Finding</text><text class="s" x="845" y="94" text-anchor="middle">needs_review</text>
+  <line class="ln" x1="160" y1="80" x2="198" y2="80" marker-end="url(#arr2)"/><text class="lbl" x="179" y="72" text-anchor="middle">ask</text>
+  <line class="ln" x1="350" y1="80" x2="388" y2="80" marker-end="url(#arr2)"/><text class="lbl" x="369" y="72" text-anchor="middle">ctx</text>
+  <line class="ln" x1="540" y1="80" x2="578" y2="80" marker-end="url(#arr2)"/><text class="lbl" x="559" y="72" text-anchor="middle">quotes</text>
+  <line class="ln" x1="730" y1="80" x2="768" y2="80" marker-end="url(#arr2)"/><text class="lbl" x="749" y="72" text-anchor="middle">ok</text>
+  <path class="ln dash" d="M655 115 V155 H465 V117" marker-end="url(#arr2)"/><text class="lbl" x="560" y="172" text-anchor="middle">quote not found: retry, max 2</text>
+</svg>
+    </div>
+    <figcaption>The model cannot make a claim without a quote, and a quote that does not appear verbatim in the parsed document is rejected. After two failed retries the finding is stored as needs_review with the model's reasoning attached.</figcaption>
+  </figure>
+  <h3>Tools exposed to the agent</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Tool</th><th>Returns</th></tr></thead>
+    <tbody>
+      <tr><td><code>get_rule(code)</code></td><td>Checklist wording, scope, and the output schema.</td></tr>
+      <tr><td><code>get_slos(lesson)</code></td><td>Official SLOs for the lesson from the Document of Specifications.</td></tr>
+      <tr><td><code>list_sections(doc)</code></td><td>Heading tree with numbering.</td></tr>
+      <tr><td><code>read_section(doc, heading)</code></td><td>Text of one section, capped in length.</td></tr>
+      <tr><td><code>list_questions(doc, lesson)</code></td><td>Parsed questions with SLO tags and options.</td></tr>
+      <tr><td><code>search(query, scope)</code></td><td>Top matching blocks within the lesson or chapter. Never crosses into another subject.</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><b>Bounded.</b> Step cap and token budget per check; one check cannot run away.</li>
+    <li><b>Local only.</b> One <code>OllamaClient</code>, pointed at a local Ollama or one shared through an ngrok tunnel. No cloud model is implemented. A deterministic-only mode runs the whole tool with no model at all.</li>
+    <li><b>Built for a small model.</b> Context is small (about 8k tokens), so checks are chunked per section and the model only ever sees retrieved passages. A multilingual embedding model served by Ollama pre-selects candidate passages for coverage checks (LP1, LP2, PQ5), and the LLM judges those snippets instead of whole documents. Where a model lacks reliable tool calling, the same checks run as a fixed retrieve-then-judge chain; the evidence check is identical.</li>
+    <li><b>Urdu quality gate.</b> Small local models are likely to be weak at Urdu reading comprehension. Before each rule goes live, run the candidate model on a labelled Urdu sample and measure agreement with reviewers. A rule below the agreement threshold is demoted to <span class="pill">needs_review</span> only, with the retrieved passages shown, instead of an AI suggestion.</li>
+    <li><b>Subject-wide checks</b> (ST1, ST2) are an aggregation over the Question table by SLO tag, which is deterministic once tags are extracted. The AI step only helps extract missing tags.</li>
+  </ul>
+</section>
+
+<section id="output">
+  <h2>7. Outputs</h2>
+  <div class="cols">
+    <div><h3>Filled checklist (.xlsx)</h3><p>The reviewer's own workbook: same sheets, same dropdowns, one row per lesson. Fails column recomputed by the existing formula. Notes carry the code and evidence, for example <em>"LP4: heading has no number, section 3"</em>. AI suggestions are marked so they are visibly unconfirmed.</p></div>
+    <div><h3>HTML report</h3><p>Summary first (counts by scope and status), then per lesson drill-down with the quoted evidence, a link to the exact source block, and Confirm / Override controls that write <code>Override</code> rows.</p></div>
+    <div><h3>JSON</h3><p>The full findings table plus the package inventory, for pipelines and dashboards. Versioned schema.</p></div>
+  </div>
+  <p>The workbook is written by loading the original template with openpyxl and filling cells, so layout, validation lists and formulas are preserved and the template stays editable by the reviewers who own it.</p>
+</section>
+
+<section id="stack">
+  <h2>8. Technology</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Concern</th><th>Choice</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Language</td><td>Python 3.12</td><td>Best-in-class libraries for docx, pptx and xlsx styling detail (fonts, highlight, RTL, spacing).</td></tr>
+      <tr><td>Documents</td><td>python-docx, python-pptx, PyMuPDF, openpyxl</td><td>Direct access to run formatting and the original template.</td></tr>
+      <tr><td>API</td><td>FastAPI + Pydantic</td><td>Typed models double as the JSON schema for findings and rules.</td></tr>
+      <tr><td>Jobs</td><td>In-process worker queue, SQLite state</td><td>Single-node first. Interface allows a swap to Redis or Postgres later.</td></tr>
+      <tr><td>UI</td><td>Server-rendered pages with Jinja2 and HTMX</td><td>Upload, progress, report, overrides. No separate front-end build.</td></tr>
+      <tr><td>LLM</td><td>Ollama only (local, or shared via ngrok)</td><td>Offline requirement. The client stays thin so the model can change; no cloud provider is implemented.</td></tr>
+      <tr><td>Embeddings</td><td>Multilingual model via Ollama, vectors in the job store</td><td>Retrieves candidate passages for coverage checks so a small-context model can judge them.</td></tr>
+      <tr><td>Packaging</td><td>One container image</td><td>Same artifact for a laptop and a server.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="ops">
+  <h2>9. Operations, security and testing</h2>
+  <div class="cols">
+    <div><h3>Security</h3><ul><li>Zip-slip, zip-bomb and size limits at extract.</li><li>Files are only parsed, never executed or opened by Office.</li><li>Per-job workspace, deleted on a retention timer.</li><li>Documents stay on the machine running the tool. If Ollama is reached through an ngrok tunnel, prompt text passes through ngrok's servers, so protect the tunnel with authentication, or run Ollama on the same network to keep everything internal.</li></ul></div>
+    <div><h3>Reliability</h3><ul><li>Parse cache keyed by file hash; re-runs only redo changed files.</li><li>A failing check yields <span class="pill">needs_review</span> with the error, never a crash or a false Pass.</li><li>Deterministic work runs per lesson in parallel. AI calls run at low concurrency (one shared GPU), with a health check and retry. If the Ollama tunnel is down, AI checks come back as <span class="pill">needs_review</span> with the reason, never as Pass.</li></ul></div>
+    <div><h3>Testing</h3><ul><li>Unit test per deterministic rule on a minimal fixture docx.</li><li>The sample zip as a golden package: expected findings checked in.</li><li>AI checks scored against a human-labelled set; track agreement per rule and gate releases on it.</li></ul></div>
+  </div>
+</section>
+
+<section id="phases">
+  <h2>10. Delivery phases</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Phase</th><th>Scope</th><th>Usable on its own?</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Workbook rule loader, ingest and profile, inventory, parsers, the deterministic rules (page setup, fonts, colour, highlight, headings, counts, sections), filled workbook.</td><td>Built. No model needed. Together with phase 2 it decides 31 of the workbook's 67 codes fully and 20 partly; reviews the 126-file sample in about a minute.</td></tr>
+      <tr><td>2</td><td>SLO extraction from the Document of Specifications, SLO tags in questions, coverage map (ST1, ST2, PQ5, WS4, WS5).</td><td>Built. Deterministic. With untagged questions it says needs reviewer, never Fail, except the literal ST2.</td></tr>
+      <tr><td>3</td><td>Model-assisted checks with quote verification (11 codes), model recovery of unrecognised question formats, learning a format once, a textbook index, and a web page.</td><td>Built. Results are suggestions only. The remaining 5 codes are left to people. Accuracy on Urdu is under measurement.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="open">
+  <h2>11. Decisions and open conflicts</h2>
+  <p>The product owner decided that the checklist workbook is the authority and is followed as written.</p>
+  <h3>Decided</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Topic</th><th>Decision</th><th>Affects</th></tr></thead>
+    <tbody>
+      <tr><td>Model</td><td>Ollama only, local or shared through an ngrok tunnel. No cloud model.</td><td>Sections 6, 8, 9</td></tr>
+      <tr><td>Rule source</td><td>The checklist workbook. The Grade 6 Islamiat zip is only an example input.</td><td>Rule loader, profile</td></tr>
+      <tr><td>Formatting</td><td>WE rules apply to all documents as written, including Urdu. The sample is expected to fail many of them.</td><td>WE1 to WE25</td></tr>
+      <tr><td>Highlight</td><td>Yellow highlight is required. A check-mark emoji does not count.</td><td>PQ4, DB4</td></tr>
+      <tr><td>Data Bank version</td><td>Default chosen by engineering, change if wrong: review the newest version and list older ones as superseded.</td><td>DB1 to DB5, WE3</td></tr>
+    </tbody>
+  </table></div>
+  <h3>How package files bind to checklist sheets</h3>
+  <p>Following the workbook means files are bound by scope and content. File names are only a hint.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Sheet</th><th>Scope and rule in workbook</th><th>Package file bound to it</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Chapter Exam</td><td>Per lesson, 6 to 8 questions, 70/30 split.</td><td>The per-lesson <code>Assessment</code> files.</td><td>Lesson 1's Assessment has 6 questions, which fits CE1.</td></tr>
+      <tr><td>Worksheet</td><td>Per chapter, 8 to 10 questions, 40/60 split.</td><td>The per-chapter <code>Chapter-Exam-Chapter-N</code> files.</td><td>The file name says "Chapter Exam" but its scope is the workbook's Worksheet. The report flags the naming mismatch. Chapter 2's file has 20 questions, so WS1 fails.</td></tr>
+      <tr><td>Data Bank</td><td>Per lesson, 4 to 6 items, MCQ only, lower-order only.</td><td>The newest <code>Data-Bank</code> file.</td><td>The sample has 15 per lesson in mixed types, so DB1 fails by design.</td></tr>
+    </tbody>
+  </table></div>
+  <p>No overrides are used. If the real rules change, the workbook is edited and the tool follows it.</p>
+</section>
+
+</div>
