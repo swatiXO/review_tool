@@ -279,24 +279,25 @@ def _count_check(code, qs, lo, hi, key=None, chapter=None, doc=None):
                   evidence=["The question count is within range; the level split is not checked by code."])
 
 
-HIGHER = ["higher", "analy", "evaluat", "creat", "critical", "تجزیہ", "تجزی", "تنقیدی", "تخلیقی", "جائزہ", "فیصلہ", "اعلیٰ"]
-LOWER = ["lower", "remember", "understand", "apply", "fidelity", "recall", "یاد", "فہم", "سمجھ", "اطلاق", "کتابی", "معروضی"]
+_DEFAULT_WORDS = {"higher_order_words": ["higher", "analy", "evaluat", "creat"], "lower_order_words": ["lower", "remember", "understand", "apply"]}
 
 
-def question_level(q):
+def question_level(q, vocab=None):
     """'higher' / 'lower' / None from the level written with the question (its heading line, or the
     template's Order Level column)."""
+    vocab = vocab or {}
+    words = lambda k: vocab.get(k) or _DEFAULT_WORDS[k]
     head = normalize(q.text.split("\n")[0] + " " + " ".join(re.findall(r"(?:order level|آرڈر لیول)[^\n]*", q.block, re.I))).lower()
-    hi = any(normalize(w).lower() in head for w in HIGHER)
-    lo = any(normalize(w).lower() in head for w in LOWER)
+    hi = any(normalize(w).lower() in head for w in words("higher_order_words"))
+    lo = any(normalize(w).lower() in head for w in words("lower_order_words"))
     return "higher" if hi and not lo else "lower" if lo and not hi else None
 
 
-def _split_check(f, qs, want_higher, label):
+def _split_check(f, qs, want_higher, label, vocab=None):
     """Turn a count Pass into Fail when the questions' own level labels show the split is far off."""
     if f.status != PASS or not qs:
         return f
-    levels = [question_level(q) for q in qs]
+    levels = [question_level(q, vocab) for q in qs]
     known = [l for l in levels if l]
     if len(known) < max(2, len(qs) / 2):
         f.evidence.append(f"The {label} split was not checked: fewer than half the questions state their level")
@@ -363,13 +364,13 @@ def exam_checks(ctx, doc, info, doc_type):
     qs, summary, why_not = get_questions(ctx, doc, info)
     out = []
     if doc_type == "chapter_exam":
-        out.append(_split_check(_count_check("CE1", qs, 6, 8, key=doc.key, doc=doc.rel), qs, 0.3, "70/30"))
+        out.append(_split_check(_count_check("CE1", qs, 6, 8, key=doc.key, doc=doc.rel), qs, 0.3, "70/30", ctx.profile["vocab"]))
         out.append(_tag_check(ctx, "CE4", qs, info, key=doc.key, doc=doc.rel))
         f = _answer_key(ctx, info, qs)
         f.lesson, f.doc = doc.key, doc.rel
         out.append(f)
     else:
-        out.append(_split_check(_count_check("WS1", qs, 8, 10, chapter=doc.chapter, doc=doc.rel), qs, 0.6, "40/60"))
+        out.append(_split_check(_count_check("WS1", qs, 8, 10, chapter=doc.chapter, doc=doc.rel), qs, 0.6, "40/60", ctx.profile["vocab"]))
         mix = Counter(q.qtype for q in qs)
         out.append(result("WS2", REVIEW, "Question formats found: " + ", ".join(f"{k} {v}" for k, v in mix.most_common()) +
                           " (the workbook asks for a mix drawn from six formats; the reviewer judges the mix)",

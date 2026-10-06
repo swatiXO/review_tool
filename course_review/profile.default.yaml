@@ -62,8 +62,8 @@ vocab:
                             "مقرر کے لیے نوٹ", "مقرر کے لیے مشورہ"]
   reference_list_labels: ["References", "Reference List", "Bibliography", "حوالہ جات"]
   slo_tag_patterns: ['\bSLO\b', 'حاصلات? ?تعلیم', '[A-Z]-\d{2}-[A-Z]-\d{2}']
-  lesson_plan_location_labels: ["Lesson Plan Location"]      # add Urdu wording here when known
-  feedback_labels: ["Correct feedback", "Incorrect feedback"] # add Urdu wording here when known
+  lesson_plan_location_labels: ["Lesson Plan Location", "سبق کے منصوبے میں مقام"]     # Pop Quiz template, English and Urdu
+  feedback_labels: ["Correct feedback", "Incorrect feedback", "درست فیڈبیک", "غلط فیڈبیک"]
   answer_key_labels: ["Answer Key", "Answers", "جوابات", "جواب نامہ", "کلید جوابات"]
   # lines that start with these are labels inside a question (answer, hint), never section headings
   answer_line_labels: ["Answer", "Model answer", "Sample answer", "Hint", "مثالی جواب", "جواب", "اشارہ"]
@@ -84,6 +84,14 @@ vocab:
     answer: ["مثالی جواب", "Answer", "Correct answer"]
     feedback_correct: ["درست جواب کا فیڈبیک", "Correct feedback"]
     feedback_incorrect: ["غلط جواب کا فیڈبیک", "Incorrect feedback"]
+  # Words in a question's type label that say its order level (Bloom's), for the 70/30 and 40/60 splits.
+  higher_order_words: ["higher", "analy", "evaluat", "creat", "critical", "reasoning", "تجزیہ", "تجزی", "تنقیدی", "تخلیقی",
+                       "جائزہ", "فیصلہ", "اعلیٰ", "استدلال", "خود احتساب", "منصوبہ بندی"]
+  lower_order_words: ["lower", "remember", "understand", "apply", "fidelity", "recall", "یاد", "فہم", "سمجھ", "اطلاق",
+                      "کتابی", "معروضی", "وضاحت"]
+  # Titles before a name that mean a historical or religious person, not a story character (LP7).
+  honorifics: ["حضرت", "سیدنا", "امام", "Hazrat", "Prophet", "Imam"]
+  honorifics_after: ["رضی", "علیہ", "صلی", "ﷺ"]
   # Workbook says "lower-order only" without defining it. Bloom's lower-order levels:
   lower_order_levels: ["یاد کرنا", "سمجھنا", "اطلاق", "Remember", "Understand", "Apply"]
 

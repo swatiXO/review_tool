@@ -158,9 +158,24 @@ def lp7(ctx, key, doc, secs, slos):
                   "Does the story or scenario from the Introduction come back in every Concept Building sub-topic, and is it resolved in Key Takeaways?")
         return suggestion("LP7", j, **where(key, doc))
     from ..judge import Judgement, _loose
-    def named(text):                      # whole words only: a short name must not match inside another word
-        t = f" {_loose(text)} "
-        return any(f" {_loose(nm)} " in t for nm in names)
+    vocab = ctx.profile["vocab"]
+    before = [_loose(h) for h in vocab.get("honorifics", [])]
+    after = [_loose(h) for h in vocab.get("honorifics_after", [])]
+
+    def named(text):
+        """Whole words only (a short name must not match inside another word), and not a historical
+        person who shares the character's name ('حضرت حمزہ رضی اللہ عنہ' is not the story's Hamza)."""
+        words = _loose(text).split()
+        for i, w in enumerate(words):
+            for nm in names:
+                parts = _loose(nm).split()
+                if words[i:i + len(parts)] != parts:
+                    continue
+                prev = words[i - 1] if i else ""
+                nxt = words[i + len(parts)] if i + len(parts) < len(words) else ""
+                if prev not in before and not any(nxt.startswith(a) for a in after if a):
+                    return True
+        return False
     has = [i for i, (h, body) in enumerate(subs, 1) if named(h + " " + body)]
     missing = [i for i in range(1, len(subs) + 1) if i not in has]
     resolved = named(secs["key_takeaways"] + " " + subs[-1][1])

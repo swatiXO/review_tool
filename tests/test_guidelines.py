@@ -11,7 +11,7 @@ from course_review.docx_model import parse_docx
 from course_review.models import DocRef, FAIL, NA, PASS, REVIEW
 from course_review.questions import Question
 
-from helpers import add, make_ctx, new_doc, ref, save
+from helpers import PROFILE, add, make_ctx, new_doc, ref, save
 from test_slides_citations import deck
 
 SECTIONS = ["Introduction", "SLOs", "Warm-up", "Concept Building", "Key Takeaways"]
@@ -141,9 +141,12 @@ def q(n, head, block=""):
 
 
 def test_question_level_from_labels():
-    assert question_level(q(1, "سوال ١ (کثیر الانتخابی — تنقیدی سوچ)")) == "higher"
-    assert question_level(q(2, "Question 2 (Remember)")) == "lower"
-    assert question_level(q(3, "Question 3")) is None
+    v = PROFILE["vocab"]
+    assert question_level(q(1, "سوال ١ (کثیر الانتخابی — تنقیدی سوچ)"), v) == "higher"
+    assert question_level(q(2, "سوال 1  قسم: استدلالی سوال"), v) == "higher"
+    assert question_level(q(3, "سوال 2   قسم: تصوراتی وضاحت"), v) == "lower"
+    assert question_level(q(4, "Question 2 (Remember)"), v) == "lower"
+    assert question_level(q(5, "Question 3"), v) is None
 
 
 def test_ce1_split_fails_when_labels_show_mostly_higher_order():
