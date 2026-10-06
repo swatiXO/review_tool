@@ -34,3 +34,21 @@ def test_one_lesson_package_finds_its_pop_quiz_section(tmp_path):
     cli.review(z, str(checklist(tmp_path)), str(out))
     found = {f["code"]: f for f in json.load(open(out / "review.json"))["findings"] if f["lesson"] == "Ch4-L2"}
     assert found["PQ1"]["status"] == "pass" and "2 MCQ" in found["PQ1"]["message"]
+
+
+def test_loose_lesson_files_without_folders_keep_their_lesson_and_no_chapter_exam_fail(tmp_path):
+    root = tmp_path / "upload"
+    root.mkdir()
+    lp = new_doc()
+    add(lp, "Lesson Plan", bold=True)
+    for s in ("Introduction", "SLOs", "Warm-up", "Concept Building", "Key Takeaways"):
+        add(lp, s, bold=True)
+        add(lp, "Some text here.")
+    lp.save(str(root / "Lesson-2-Chapter-4-Lesson-Plan.docx"))
+    z = zip_dir(str(root), str(tmp_path / "loose.zip"))
+    out = tmp_path / "out"
+    cli.review(z, str(checklist(tmp_path)), str(out))
+    r = json.load(open(out / "review.json"))
+    assert [d["lesson"] for d in r["inventory"]["documents"]] == ["2"]
+    ws1 = [f for f in r["findings"] if f["code"] == "WS1"]
+    assert ws1 and all(f["status"] == "needs_review" for f in ws1)

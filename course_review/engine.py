@@ -57,6 +57,8 @@ def _collapse_lessonless_chapters(pkg):
     for d in pkg.docs:
         if d.folder_label and d.chapter is not None:
             has_folder[d.chapter] = True
+    if not any(has_folder.values()):
+        return            # loose files (e.g. one lesson uploaded without folders): trust the lesson numbers in the file names
     for d in pkg.docs:
         if d.scope == "lesson" and d.chapter is not None and not has_folder[d.chapter]:
             d.lesson, d.variant = None, ""
@@ -200,10 +202,15 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
         if k not in have["chapter_exam"]:
             F.append(result("CE1", FAIL, "No Chapter Exam (per-lesson assessment) file found for this lesson", lesson=k))
             missing.append((lesson_label(pkg, k), "Chapter Exam (per-lesson assessment)"))
+    # An upload of single lessons carries no chapter-level files; that is not a missing Chapter Exam.
+    lessons_only = not any(d.scope in ("chapter", "subject") for d in pkg.docs)
     for ch in chapters:
         if ch not in have["worksheet"]:
-            F.append(result("WS1", FAIL, "No Worksheet (per-chapter exam) file found for this chapter", chapter=ch))
-            missing.append((f"Chapter {ch}", "Worksheet (per-chapter exam)"))
+            if lessons_only:
+                F.append(result("WS1", REVIEW, "This upload holds lesson files only, so the chapter's Chapter Exam was not reviewed", chapter=ch))
+                continue
+            F.append(result("WS1", FAIL, "No Chapter Exam (per-chapter) file found for this chapter", chapter=ch))
+            missing.append((f"Chapter {ch}", "Chapter Exam (per-chapter)"))
 
     # 4. derived LP10 / FG8
     def derive(code, components, doc_type):
