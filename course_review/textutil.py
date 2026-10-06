@@ -76,3 +76,28 @@ def starts_with_label(text: str, labels, max_plain_len: int = 80):
             if not rest or rest[0] in ":：—–-|·" or len(t) <= max_plain_len:
                 return True
     return False
+
+
+_HARAKAT = re.compile("[\u064B-\u0652\u0670\u06E1]")   # tanween, fatha, kasra, damma, shadda, sukun, dagger alef
+
+
+def is_arabic_scripture(text: str) -> bool:
+    """Quran, hadith or dua text in fully vowelled Arabic. Urdu prose carries a vowel mark here and there
+    (an izafat kasra); scripture carries them on most letters. Verse numbers in ornate brackets ﴿١﴾ are
+    handled by VERSE_MARK.
+    Such text is quoted, never edited: no renumbering, no digit or font changes, not a heading."""
+    if not text:
+        return False
+    letters = sum(1 for c in text if is_arabic_letter(c))
+    if letters < 6:
+        return False
+    return len(_HARAKAT.findall(text)) / letters >= 0.25     # Urdu prose: under 0.05; short hadith with a reference: ~0.3
+
+
+# ﴿١٥٣﴾: a verse number, quoted as written. In right-to-left text the opening bracket is U+FD3F, so
+# either order is accepted.
+VERSE_MARK = re.compile("[\ufd3e\ufd3f][^\ufd3e\ufd3f]{0,12}[\ufd3e\ufd3f]")
+
+
+def outside_verse_marks(text: str) -> str:
+    return VERSE_MARK.sub(" ", text or "")

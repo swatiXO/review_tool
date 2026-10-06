@@ -67,3 +67,30 @@ def test_check_mark_becomes_a_yellow_highlight_and_lesson_sections_still_split(t
     pq = {f["code"]: f for f in r["findings"] if f["lesson"] == "Ch4-L2" and f["code"].startswith("PQ")}
     assert pq["PQ1"]["status"] in ("pass", "fail") and "Pop Quiz has" not in pq["PQ1"]["message"]
     assert pq["PQ4"]["status"] == "pass"
+
+
+def test_quran_hadith_and_dua_text_is_never_edited(tmp_path):
+    from docx import Document
+    root = tmp_path / "Grade-6-Islamiat"
+    ch = root / "Chapter-1-Quran"
+    ch.mkdir(parents=True)
+    d = new_doc(size=11)
+    add(d, "باب اول: قرآن مجید", bold=True, rtl=True)
+    add(d, "سورۃ العصر", bold=True, rtl=True)
+    verse = "وَالْعَصْرِ ﴿١﴾ إِنَّ الْإِنسَانَ لَفِي خُسْرٍ ﴿٢﴾"
+    add(d, "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", bold=True, rtl=True, urdu_font="Traditional Arabic")
+    add(d, verse, rtl=True, urdu_font="Traditional Arabic")
+    add(d, "ترجمہ: زمانے کی قسم ﴿١﴾ آیت ٢ میں", rtl=True)
+    d.save(str(ch / "Chapter-1-Lesson-Plan.docx"))
+    out = tmp_path / "out"
+    cli.review(zip_dir(str(root), str(tmp_path / "p.zip")), str(checklist(tmp_path)), str(out))
+    z = zipfile.ZipFile(out / cli.MARKED_UP)
+    name = next(n for n in z.namelist() if n.endswith(".docx"))
+    (tmp_path / "f.docx").write_bytes(z.read(name))
+    texts = [p.text for p in Document(str(tmp_path / "f.docx")).paragraphs]
+    assert "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ" in texts            # not numbered as a heading
+    assert verse in texts                                       # ayah numbers kept as written
+    assert "ترجمہ: زمانے کی قسم ﴿١﴾ آیت 2 میں" in texts           # Urdu digit fixed, the verse mark kept
+    fonts = {r.font.element.rPr.rFonts.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cs")
+             for p in Document(str(tmp_path / "f.docx")).paragraphs if p.text == verse for r in p.runs}
+    assert fonts == {"Traditional Arabic"}

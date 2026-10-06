@@ -12,7 +12,7 @@ from ..docx_model import DocxInfo
 from ..models import FAIL, NA, PASS, REVIEW
 from ..pptx_model import PptxInfo
 from ..questions import is_yellow
-from ..textutil import EASTERN_DIGITS, normalize, to_western_digits
+from ..textutil import EASTERN_DIGITS, VERSE_MARK, is_arabic_scripture, normalize, outside_verse_marks, to_western_digits
 from .common import canon_font, is_grey, mark, pct, result, top
 
 A4 = (8.27, 11.69)
@@ -129,7 +129,7 @@ def we6(ctx, doc, info):
 def we7(ctx, doc, info):
     fonts = Counter()
     for r in _runs(info):
-        if r.script == "arabic":
+        if r.script == "arabic" and not is_arabic_scripture(r.text):
             fonts[r.font or "(unresolved)"] += len(r.text)
     if not fonts:
         return result("WE7", NA, "No Urdu text in this document")
@@ -236,21 +236,24 @@ def we8(ctx, doc, info: DocxInfo):
 # ----------------------------------------------------------------- bilingual
 
 def we10(ctx, doc, info):
-    hits, verse, marks = [], 0, []
+    hits, marks = [], []
     texts = [(p.text, None) for p in info.paras] if isinstance(info, DocxInfo) else [(r.text, r.slide) for r in info.runs]
-    marker = re.compile("﴿[^﴾]*﴾")  # Quranic verse-number ornament
+    quoted = 0
     for t, slide in texts:
-        found = EASTERN_DIGITS.findall(t)
+        if is_arabic_scripture(t):              # Quran / hadith / dua text is quoted as written
+            quoted += len(EASTERN_DIGITS.findall(t))
+            continue
+        quoted += sum(len(EASTERN_DIGITS.findall(m)) for m in VERSE_MARK.findall(t))
+        found = EASTERN_DIGITS.findall(outside_verse_marks(t))
         if found:
             hits.append((t.strip()[:60], len(found)))
             marks.append(mark(t, "non-Western digits: " + " ".join(found[:5]), slide))
-            verse += sum(len(EASTERN_DIGITS.findall(m)) for m in marker.findall(t))
+    note = [f"{quoted} digit(s) inside verse-number markers or quoted Quran / hadith / dua text were left as written."] if quoted else []
     if hits:
         total = sum(n for _, n in hits)
-        extra = f", {verse} of them inside Quranic verse-number markers" if verse else ""
-        return result("WE10", FAIL, f"{total} non-Western digit(s) in {len(hits)} place(s){extra}",
-                      [f"'{t}' ({n})" for t, n in hits[:6]], marks=marks)
-    return result("WE10", PASS, "All numerals are Western (1, 2, 3)")
+        return result("WE10", FAIL, f"{total} non-Western digit(s) in {len(hits)} place(s)",
+                      [f"'{t}' ({n})" for t, n in hits[:6]] + note, marks=marks)
+    return result("WE10", PASS, "All numerals are Western (1, 2, 3)", partial=bool(quoted), evidence=note)
 
 
 def we11(ctx, doc, info: DocxInfo):
@@ -365,6 +368,10 @@ def heading_like(ctx, p):
         return False                  # 'سوال ١ (...)' / 'Question 3:' is a question, not a section heading
     if own_number(ctx, t):
         return False
+    if is_arabic_scripture(t):
+        return False                  # a verse, hadith or dua line, not a heading
+    if normalize(t).lower().rstrip(":：") in {normalize(x).lower() for x in ctx.profile["vocab"].get("slo_sublabels", [])}:
+        return False                  # 'علم' / 'صلاحیت' label the SLOs; they are not section headings
     nt = normalize(t).lower()
     if any(nt.startswith(normalize(l).lower()) for l in ctx.profile["vocab"].get("answer_line_labels", [])):
         return False                  # 'Model answer: ...' inside a question
