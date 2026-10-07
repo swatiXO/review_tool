@@ -68,11 +68,14 @@ def fg2(ctx, doc, info):
 
 
 def fg7(ctx, doc, info):
+    from ..structure import of, parser_slide_roles
     sections = ctx.profile["lesson_plan_sections"]
-    found = {}
-    for sec in sections:
-        labs = [normalize(l).lower() for l in sec["labels"]]
-        found[sec["key"]] = next((s.index for s in info.slides_text if any(l in normalize(s.title).lower() for l in labs)), None)
+    st = of(info)
+    if st is not None:
+        found = dict(st.sections)
+    else:
+        roles = parser_slide_roles(ctx, info)
+        found = {sec["key"]: next((n for n in sorted(roles) if roles[n] == sec["key"]), None) for sec in sections}
     keys = [s["key"] for s in sections]
     missing = [k for k in keys if found[k] is None]
     present = [(found[k], k) for k in keys if found[k] is not None and k != "slos"]

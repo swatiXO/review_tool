@@ -11,7 +11,17 @@ from .formatting import we12
 
 
 def find_sections(ctx, info: DocxInfo):
-    """first paragraph index of each mandatory section, or None."""
+    """First paragraph index of each mandatory section, or None: the model's reading reconciled with the
+    parser's when the structure was read (structure.py), the parser's alone otherwise."""
+    from ..structure import of
+    st = of(info)
+    if st is not None:
+        return dict(st.sections)
+    return parser_sections(ctx, info)
+
+
+def parser_sections(ctx, info: DocxInfo):
+    """First paragraph index of each mandatory section by its label words, or None."""
     found = {}
     for sec in ctx.profile["lesson_plan_sections"]:
         for p in info.paras:
@@ -38,6 +48,12 @@ def lp3(ctx, doc, info):
         if out_of_order:
             ev.append("out of order: " + ", ".join(out_of_order))
         return result("LP3", FAIL, "; ".join(ev), ev)
+    from ..structure import of
+    st = of(info)
+    if st is not None and st.found_as:
+        names = {s["key"]: s["labels"][0] for s in ctx.profile["lesson_plan_sections"]}
+        return result("LP3", PASS, "All five sections present in order", evidence=[
+            f"{names[k]} recognised by its content: '{t[:50]}'" for k, t in st.found_as.items()])
     return result("LP3", PASS, "All five sections present in order")
 
 
@@ -77,6 +93,11 @@ def slo_blocks(ctx, info: DocxInfo):
 
 
 def lp5(ctx, doc, info: DocxInfo):
+    from ..structure import of
+    st = of(info)
+    if st is not None and st.sections.get("slos") is not None:
+        items = [info.paras[i] for i in st.lists.get("slo_items", [])]
+        return _lp5_verdict(items, "")
     blocks = slo_blocks(ctx, info)
     if not blocks:
         return result("LP5", REVIEW, "The SLO section was not found, so the SLO list could not be checked")
@@ -97,6 +118,10 @@ def lp5(ctx, doc, info: DocxInfo):
             if any(head.startswith(x) or (x in head and ":" in t[:45]) for x in stops):
                 break     # 'Note:', 'طلبہ کے لیے ہدایت:', 'برائے اساتذہ' ... end the SLO list; what follows is not SLOs
             items.append(p)
+    return _lp5_verdict(items, f" in {len(blocks)} SLO sections" if len(blocks) > 1 else "")
+
+
+def _lp5_verdict(items, where):
     if not items:
         return result("LP5", REVIEW, "No SLO items found under the SLO heading")
     bad = []
@@ -106,7 +131,6 @@ def lp5(ctx, doc, info: DocxInfo):
             bad.append(("numbered", p))
         elif p.list_kind != "bullet" and not is_bullet_text(p.text):
             bad.append(("not a bullet", p))
-    where = f" in {len(blocks)} SLO sections" if len(blocks) > 1 else ""
     if bad:
         ev = [f"'{p.text.strip()[:40]}' is {why}" for why, p in bad[:6]]
         return result("LP5", FAIL, f"{len(bad)} of {len(items)} SLO items{where} are not bullets ({bad[0][0]})", ev,

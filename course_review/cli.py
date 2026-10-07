@@ -58,7 +58,9 @@ def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=No
         say("Writing the workbook and report", 0, 0)
         xlsx = report.write_outputs(pkg, res, rules, layout, checklist, out_dir, Path(zip_path).name, model=model)
         say("Fixing and marking up the documents", 0, 0)
-        annotate.annotate_package(pkg, res.findings, Path(out_dir) / MARKED_UP, rules, profile=profile)
+        res.rules = rules
+        res.markup = annotate.annotate_package(pkg, res.findings, Path(out_dir) / MARKED_UP, rules, profile=profile,
+                                                ctx=getattr(res, "ctx", None))
     finally:
         if not keep:
             shutil.rmtree(work, ignore_errors=True)
@@ -86,7 +88,7 @@ def main(argv=None):
                         "decide: model-based Fails are also written to the workbook")
     r.add_argument("--model-checks", nargs="?", const="all", metavar="CODES",
                    help="also run the model-assisted judgement checks (LP1, LP2, LP6, LP7, LP8, LP9, FG1, FG3, FG6, CE2, CE3, "
-                        "and SLO mapping for PQ5/WS5). Optionally a comma list, e.g. LP1,FG1. Results are suggestions only.")
+                        "SLO mapping for PQ5/WS5, Bloom's levels for CE1/WS1, feedback quality for PQ3/DB3). Optionally a comma list, e.g. LP1,FG1. Results are suggestions only.")
     r.add_argument("--book-index", help="folder made by index-book; lets LP2, LP8, CE2 and CE3 consult the textbook")
     _model_args(r)
 
@@ -194,9 +196,13 @@ def main(argv=None):
     print(f"Reviewed {len(pkg.docs)} documents in {secs:.0f}s: {c['fail']} fails, {c['pass']} passes, "
           f"{c['needs_review']} need review, {c['na']} n/a")
     if model is not None:
-        used = [s for s in res.model_stats if s.get("usable")]
+        read = [s for s in res.model_stats if s.get("structure")]
+        if read:
+            print(f"Structure read by the model: {sum(1 for s in read if s.get('usable'))} of {len(read)} document(s)")
+        res_regions = [s for s in res.model_stats if not s.get("structure")]
+        used = [s for s in res_regions if s.get("usable")]
         print(f"Model fallback ({model.mode}): {len(used)} region(s) recovered, "
-              f"{len(res.model_stats) - len(used)} not recovered, {model.client.calls} model call(s), {model.client.seconds:.0f}s")
+              f"{len(res_regions) - len(used)} not recovered, {model.client.calls} model call(s), {model.client.seconds:.0f}s")
     print(f"Wrote {xlsx}")
     print(f"      {Path(a.out) / 'report.html'}")
     print(f"      {Path(a.out) / 'review.json'}")

@@ -178,8 +178,8 @@ def we8(ctx, doc, info: DocxInfo):
     wrong = {k: 0 for k in cats}
     totals = {k: 0 for k in cats}
     for p in info.paras:
-        if not p.text.strip():
-            continue
+        if not p.text.strip() or is_arabic_scripture(p.text):
+            continue                  # Quran / hadith / dua text is quoted as written, size included
         norm = normalize(p.text)
         is_caption = bool(_CAPTION_STYLE.search(p.style)) or bool(tcap.match(norm) or fcap.match(norm))
         if p.is_title or (p is first and not p.heading_level):
@@ -352,10 +352,51 @@ def own_number(ctx, text):
     their own number. They are not section headings to number 1, 1.1 (and numbering them would break how the
     Pop Quiz and Data Bank are split into lessons)."""
     t = to_western_digits(normalize(text)).strip().lower()
-    labels = [normalize(x).lower() for x in ctx.profile["vocab"].get("lesson_heading_prefixes", []) + ["باب", "chapter"]]
+    labels = [normalize(x).lower() for x in ctx.profile["vocab"].get("lesson_heading_prefixes", []) + ["باب", "chapter", "unit", "یونٹ"]]
     ordinals = [normalize(w).lower() for ws in ctx.profile["vocab"].get("chapter_ordinals", {}).values() for w in ws]
     alt = "|".join(map(re.escape, ordinals)) or "x^"
     return any(re.match(rf"^{re.escape(l)}\s*[:\-–]?\s*(?:\d+|{alt})(?![\w])", t) for l in labels)
+
+
+def appendix_heading(ctx, text):
+    """Headings after the five sections that the template leaves unnumbered (the Book and SLO coverage map,
+    references)."""
+    t = normalize(text).strip().lower()
+    return any(t.startswith(normalize(l).lower()) for l in ctx.profile["vocab"].get("appendix_headings", []))
+
+
+RUN_IN = re.compile(r"^(.{2,60}?)\s*[:：]\s*(\S.{30,})$", re.S)
+
+
+def run_in_split(ctx, text):
+    """'Warm-up: "..." and the section's first lines' -> the label length to keep as the heading, or None.
+    Only for a known section label, or any short label followed by a long text."""
+    from ..textutil import starts_with_label
+    m = RUN_IN.match(text or "")
+    if not m:
+        return None
+    if starts_with_label(m.group(1), ctx.section_labels) or len(m.group(2)) > 60:
+        return m.end(1)
+    return None
+
+
+OPTION_LIST = re.compile(r"\S\s*/\s*\S[^/]*\s/\s*\S")      # two or more ' / ' separators
+
+
+SENTENCE_END = re.compile(r"[.!?؟۔](?=\s|$)")
+
+
+def misstyled_body(p, ctx=None):
+    """Running text set in a Heading style: a long line or two or more sentences. It is body text with the
+    wrong style (it fills the navigation pane and a TOC), not a heading that lacks a number."""
+    if not p.heading_level or p.in_table:
+        return False
+    t = re.sub(r"^\s*[\d٠-٩۰-۹]+(?:\.[\d٠-٩۰-۹]+)*[.)]?\s*", "", p.text.strip())
+    if ctx is not None:
+        from ..textutil import starts_with_label
+        if starts_with_label(t, ctx.section_labels):
+            return False              # 'Warm-up: "..."' is a section heading with its first line run in
+    return len(t) > 90 or len(SENTENCE_END.findall(t)) >= 2
 
 
 def heading_like(ctx, p):
@@ -375,8 +416,10 @@ def heading_like(ctx, p):
     nt = normalize(t).lower()
     if any(nt.startswith(normalize(l).lower()) for l in ctx.profile["vocab"].get("answer_line_labels", [])):
         return False                  # 'Model answer: ...' inside a question
+    if OPTION_LIST.search(t):
+        return False                  # 'Leaves / Roots / Branches' lists a question's answer options
     if p.heading_level:
-        return True
+        return not misstyled_body(p, ctx)
     if len(t) > 90 or p.list_kind:
         return False
     from ..textutil import starts_with_label
@@ -386,8 +429,19 @@ def heading_like(ctx, p):
 
 
 def doc_headings(ctx, info: DocxInfo):
-    """Section headings. The document's opening line is its title, not a numbered heading,
-    unless it is set in a Heading style."""
+    """Section headings: the model's reading reconciled with the parser's when the structure was read
+    (structure.py), the parser's alone otherwise."""
+    from ..structure import of
+    st = of(info)
+    if st is not None and st.kind == "lesson_plan":
+        # a line in dispute has its own note (STR1) and is not counted for or against the heading rules
+        return [p for p in info.paras if p.idx in st.headings and p.idx not in st.disputed_headings]
+    return parser_headings(ctx, info)
+
+
+def parser_headings(ctx, info: DocxInfo):
+    """Section headings by style, boldness and label words. The document's opening line is its title,
+    not a numbered heading, unless it is set in a Heading style."""
     first = next((p for p in info.paras if p.text.strip() and not p.in_table), None)
     return [p for p in info.paras if heading_like(ctx, p) and not (p is first and not p.heading_level)]
 
@@ -402,6 +456,8 @@ def we12(ctx, doc, info: DocxInfo):
             nums = tuple(int(x) for x in re.findall(r"\d+", p.num_label)) if p.list_kind == "decimal" else None
         else:
             nums = leading_number(p.text)
+        if nums is None and appendix_heading(ctx, p.text):
+            continue
         if nums is None:
             unnumbered.append(p)
             marks.append(mark(p.text, "heading has no decimal number (1, 1.1, 1.1.1)"))
@@ -434,13 +490,17 @@ def we12(ctx, doc, info: DocxInfo):
 
 def we13(ctx, doc, info: DocxInfo):
     heads = doc_headings(ctx, info)
-    if not heads:
+    body = [p for p in info.paras if misstyled_body(p, ctx) and not is_arabic_scripture(p.text)]
+    if not heads and not body:
         return result("WE13", NA, "No headings found")
     fake = [p for p in heads if not p.heading_level]
-    if fake:
-        return result("WE13", FAIL, f"{len(fake)} of {len(heads)} headings use the '{fake[0].style}' style, not a built-in Heading style",
-                      [f"'{p.text.strip()[:40]}' (style: {p.style})" for p in fake[:6]],
-                      marks=[mark(p.text, f"looks like a heading but uses the '{p.style}' style, not a Heading style") for p in fake])
+    if fake or body:
+        msgs = ([f"{len(fake)} of {len(heads)} headings use the '{fake[0].style}' style, not a built-in Heading style"] if fake else []) \
+            + ([f"{len(body)} paragraph(s) of running text are set in a Heading style"] if body else [])
+        return result("WE13", FAIL, "; ".join(msgs),
+                      [f"'{p.text.strip()[:40]}' (style: {p.style})" for p in (fake + body)[:6]],
+                      marks=[mark(p.text, f"looks like a heading but uses the '{p.style}' style, not a Heading style") for p in fake]
+                      + [mark(p.text, f"body text in the '{p.style}' style; use the Normal style") for p in body])
     return result("WE13", PASS, "All headings use built-in Heading styles")
 
 

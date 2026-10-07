@@ -499,6 +499,7 @@ def data_bank_checks(ctx):
         else:
             out.append(result("DB2", PASS, "Every item carries Subject, Chapter, Lesson and SLO tags", lesson=k, doc=bank.rel))
 
+        ctx.__dict__.setdefault("_db_by_lesson", {})[k] = its     # for the model's feedback check (judgement.augment_feedback)
         nofb = [f for f in ("feedback_correct", "feedback_incorrect") if not all(f in i.present and i.fields.get(f) for i in its)]
         if nofb:
             out.append(result("DB3", FAIL, "No correct/incorrect feedback field on the items", lesson=k, doc=bank.rel,

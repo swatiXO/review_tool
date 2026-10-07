@@ -53,6 +53,7 @@ class PptxInfo:
     char_count: int = 0
     notes_chars: int = 0
     slides_text: list = field(default_factory=list)
+    core_version: str = ""        # the Version field in the file's properties
     footers: list = field(default_factory=list)     # (slide, kind 'ftr'|'sldNum'|'dt', text) of footer placeholders shown
 
 
@@ -81,6 +82,10 @@ def parse_pptx(path) -> PptxInfo:
     prs = Presentation(path)
     info = PptxInfo(path=str(path), width_in=Emu(prs.slide_width).inches, height_in=Emu(prs.slide_height).inches,
                     slides=len(prs.slides))
+    try:
+        info.core_version = prs.core_properties.version or ""
+    except Exception:
+        pass
     # master body line spacing, if defined
     try:
         m = prs.slide_masters[0]._element
@@ -181,6 +186,11 @@ def parse_pptx(path) -> PptxInfo:
                 title = slide.shapes.title.text_frame.text.strip()
         except Exception:
             pass
+        # templates often put the instructions in the title placeholder and the section name in a
+        # small box ("Key Takeaways"); a short one-line text names the slide better than a paragraph
+        short = [t for t in texts if "\n" not in t and len(t) <= 60]
+        if short and (not title or "\n" in title or len(title) > 80):
+            title = short[0]
         if not title and texts:
             title = texts[0].split("\n")[0]
         notes = slide.notes_slide.notes_text_frame.text.strip() if slide.has_notes_slide else ""

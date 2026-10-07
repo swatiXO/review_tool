@@ -43,7 +43,8 @@ class FakeJudge(_Base):
 
 
 def cfg(client, judge_on=True, codes=None, cache=None, mode="suggest"):
-    return ModelConfig(client=client, cache=cache, mode=mode, judge=judge_on, codes=codes)
+    # the structure reading has its own tests (test_structure.py); here the judgement checks are tested alone
+    return ModelConfig(client=client, cache=cache, mode=mode, judge=judge_on, codes=codes, structure=False)
 
 
 MATS = [Material("Concept Building", "A square root undoes squaring, so the square root of 49 is 7.")]

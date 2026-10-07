@@ -6,8 +6,8 @@ numbering, table captions, bullets instead of numbered lists, no colour, a foote
 of Contents for long Lesson Plans, the yellow highlight on correct answers, and the file
 name. What needs a person (content, SLOs, the story, feedback quality) is left to comments.
 
-Each fixer returns short lines for the "Fixed by the tool" comment, and the checklist codes
-it settled, so the annotator does not also comment on them.
+Each fixer returns short lines for the "Fixed by the tool" comment. A Fail is left out of the
+comments only when the same check, run again on the fixed copy, passes (see remaining).
 """
 import re
 from datetime import date
@@ -21,36 +21,82 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Mm, Pt
 from lxml import etree
 
-from .checks.formatting import own_number
+from .checks.formatting import own_number, run_in_split
+from .models import FAIL, NA, PASS, REVIEW
 from .textutil import EASTERN_DIGITS, VERSE_MARK, is_arabic_scripture, normalize, script_counts, to_western_digits
 
-# Codes a fix settles: the annotator does not comment on them on a fixed document.
-DOCX_FIXED = {"WE4", "WE6", "WE7", "WE8", "WE10", "WE11", "WE12", "WE13", "LP4", "WE16", "WE23", "WE25", "WEG1", "WEG2",
-              "LP5", "WE1", "WE2", "WE3", "LP10"}
-PPTX_FIXED = {"WE6", "WE7", "WE10", "WE23", "WE1", "WE2", "WE3", "WE25"}
+# Codes the fixer works on. A Fail on one of them is re-checked on the fixed copy (see remaining).
+DOCX_FIXED = {"WE4", "WE6", "WE7", "WE8", "WE10", "WE11", "WE12", "WE13", "LP4", "WE15", "WE16", "WE23", "WE25", "WEG1",
+              "WEG2", "LPG2", "LP5", "WE1", "WE2", "WE3"}
+PPTX_FIXED = {"WE5", "WE6", "WE7", "WE10", "WE23", "WE1", "WE2", "WE3", "WE25"}
 
 
-def settled(f, ext, doc_type, extra):
-    """True when the fixed document no longer has the problem this finding reports."""
-    if ext == "docx":
-        if f.code in ("WE12", "LP4") and not extra.get("numbered", True):
-            return False                  # headings were styled but not numbered: a person decides the numbering
-        if f.code in DOCX_FIXED:
-            return True
-        if f.code == "WE15":
-            return extra.get("toc", False)
-        if f.code == "LPG2":
-            return "numbered" in f.message
-        if f.code in ("PQ4", "DB4"):
-            return extra.get("ticked", 0) > 0 and "check-mark" in f.message
-    if ext == "pptx":
-        if f.code in PPTX_FIXED:
-            return True
-        if f.code == "WE5":
-            return "line spacing" in f.message and "16:9" not in f.message
-        if f.code == "FG8":
-            return "WE5" in f.message and "16:9" not in f.message and "WE25" not in f.message
-    return False
+def recheck(ctx, doc, path, rel):
+    """The per-document checks run again on the fixed copy at `path`, as if it were named `rel`.
+    Returns code -> Finding, or {} when the copy cannot be read (then nothing counts as fixed)."""
+    from dataclasses import replace
+    from .checks import formatting, guidelines, lessonplan
+    from .docx_model import parse_docx
+    from .pptx_model import parse_pptx
+    try:
+        info = (parse_docx if doc.ext == "docx" else parse_pptx)(path)
+    except Exception:
+        return {}
+    proxy = replace(doc, rel=rel, abs=str(path))
+    from . import structure
+    orig = ctx._cache.get(doc.rel)
+    if orig is not None and structure.of(orig) is not None:
+        info.structure = structure.transfer(structure.of(orig), orig, info)   # the model read the original, not this copy
+    had, old = rel in ctx._cache, ctx._cache.get(rel)
+    ctx._cache[rel] = info                       # a check that loads this document sees the fixed copy
+    try:
+        table = formatting.DOCX_CHECKS if doc.ext == "docx" else formatting.PPTX_CHECKS
+        out = [fn(ctx, proxy, info) for fn in table.values()]
+        out += guidelines.doc_checks(ctx, proxy, info)
+        if doc.ext == "docx" and doc.doc_type == "lesson_plan":
+            out += [fn(ctx, proxy, info) for fn in lessonplan.DOC_CHECKS.values()]
+    except Exception:
+        return {}
+    finally:
+        if had:
+            ctx._cache[rel] = old
+        else:
+            ctx._cache.pop(rel, None)
+    return {f.code: f for f in out}
+
+
+def remaining(findings, ext, after, extra):
+    """The findings to write into the fixed copy.
+
+    A Fail or needs-reviewer result on a rule the fixer works on is replaced by what the same
+    check says about the fixed copy: left out if the copy passes (or the rule no longer applies),
+    otherwise the copy's own result, so the comment describes the file the reader opens. LP10 and
+    FG8 are worked out again from the copy's results with the engine's own rule. Everything else
+    (passes, rules the fixer does not touch, a copy that could not be re-checked) is kept as it was.
+    """
+    from .engine import DERIVED, derived_finding
+    handled = DOCX_FIXED if ext == "docx" else PPTX_FIXED
+    out = []
+    for f in findings:
+        g = None
+        if f.status not in (FAIL, REVIEW) or not after:
+            g = f
+        elif ext == "docx" and f.code in ("PQ4", "DB4"):     # checked across the package, so not re-run here
+            if not (f.status == FAIL and extra.get("ticked", 0) > 0 and "check-mark" in f.message):
+                g = f
+        elif f.code in DERIVED:
+            g = derived_finding(f.code, [after[c] for c in DERIVED[f.code] if c in after]) or f
+        elif f.code in handled and f.code in after:
+            g = after[f.code]
+        else:
+            g = f
+        if g is None or (g is not f and g.status in (PASS, NA)):
+            continue
+        if g is not f:
+            g.doc, g.lesson = f.doc, f.lesson
+        out.append(g)
+    return out
+
 
 TYPE_NAMES = {"lesson_plan": "Lesson-Plan", "chapter_exam": "Assessment", "facilitator_guide": "Facilitator-Guide",
               "video_storyboard": "Storyboard", "worksheet": "Chapter-Exam", "pop_quiz": "Pop-Quiz", "data_bank": "Data-Bank",
@@ -58,11 +104,55 @@ TYPE_NAMES = {"lesson_plan": "Lesson-Plan", "chapter_exam": "Assessment", "facil
 TICKS = re.compile(r"^\s*[✅✔☑✓]️?\s*")
 
 
-def new_name(doc, grade_subject):
-    """File name in the guideline pattern [Type]-[Identifier]-[Chapter/Topic]-v[Version], keeping any version."""
+# A version is 'v' straight before the number (v2, v1.0; not 'Class V 2') or the word Version / ورژن before it.
+# The major number has at most two digits, so a year (2024) is never read as a version.
+_VNUM = r"(\d{1,2}(?:\.\d{1,3}){0,3})(?![\d.]*\d)"
+VERSION_MARKED = re.compile(r"(?:(?<![A-Za-z])v|\bversion\s*[:#]?\s*|\bver\.\s*|ورژن\s*[:#]?\s*)" + _VNUM, re.I)
+# In the text only a line that is a version label counts ('Version 1.2', 'ورژن: 2'), never prose that
+# mentions a version ('read the Urdu version 2 of the story').
+VERSION_IN_TEXT = re.compile(r"^\s*(?:version|ver\.|ورژن)\s*[:#]?\s*" + _VNUM + r"\s*$", re.I)
+# The footer the previous tool wrote ('Name | v0.1 | 2026-10-06 | Page'); its v0.1 was made up, not the document's.
+OLD_TOOL_FOOTER = re.compile(r"\|\s*v0\.1\s*\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*(?:Page|$)", re.I)
+
+
+def _last(rx, text):
+    found = rx.findall(to_western_digits(text or ""))
+    return found[-1] if found else None
+
+
+def find_version(doc, info):
+    """The document's own version and where it was found, or (None, None).
+
+    Looked for anywhere in the file name (Lesson-Plan-v2-Final, LessonPlan v1.0 (1)), then the
+    footer, then the file's properties, then an explicit 'Version 1.2' line near the top. A
+    version is never made up: one the tool cannot find is left for the writer to add (WE3 stays
+    a Fail with its comment)."""
     stem = doc.rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    m = re.search(r"-?v(\d+(?:\.\d+)*)\s*$", stem.replace(" ", ""), re.I)
-    version = m.group(1) if m else "0.1"
+    v = _last(VERSION_MARKED, stem)
+    if v:
+        return v, "the file name"
+    if info is None:
+        return None, None
+    footer = info.footer_text if doc.ext == "docx" else " ".join(t for _, _, t in info.footers)
+    if OLD_TOOL_FOOTER.search(footer):
+        footer = OLD_TOOL_FOOTER.sub("|", footer)
+    v = _last(VERSION_MARKED, footer)
+    if v:
+        return v, "the footer"
+    m = re.fullmatch(r"\s*v?\s*" + _VNUM + r"\s*", to_western_digits(getattr(info, "core_version", "") or ""), re.I)
+    if m:
+        return m.group(1), "the file properties"
+    if doc.ext == "docx":
+        for p in [p for p in info.paras if p.text.strip() and not p.in_table][:10]:
+            v = _last(VERSION_IN_TEXT, p.text.strip()[:40])
+            if v:
+                return v, "the document text"
+    return None, None
+
+
+def new_name(doc, grade_subject, version):
+    """File name in the guideline pattern [Type]-[Identifier]-[Chapter/Topic]-v[Version].
+    With no version (None) the name has no -v part, so WE1 and WE3 still ask for one."""
     t = TYPE_NAMES.get(doc.doc_type)
     if t is None:
         return None
@@ -72,7 +162,7 @@ def new_name(doc, grade_subject):
         ident = f"Chapter-{doc.chapter}" if doc.chapter is not None else "Chapter"
     else:
         ident = f"Lesson-{doc.lesson}{doc.variant}-Chapter-{doc.chapter}"
-    return f"{t}-{ident}-v{version}.{doc.ext}"
+    return f"{t}-{ident}" + (f"-v{version}" if version else "") + f".{doc.ext}"
 
 
 # ------------------------------------------------------------------------- Word
@@ -150,9 +240,91 @@ def _ensure_heading_style(doc, level):
     return st
 
 
+def _split_paragraph(el, pos):
+    """Move everything after character `pos` of paragraph `el` into a new paragraph right after it (same
+    paragraph properties, without the style), dropping the ':' and spaces at the cut. Returns the new paragraph."""
+    import copy
+    new = OxmlElement("w:p")
+    ppr = el.find(qn("w:pPr"))
+    if ppr is not None:
+        nppr = copy.deepcopy(ppr)
+        for tag in ("w:pStyle", "w:outlineLvl", "w:numPr"):
+            _drop(nppr, tag)
+        new.append(nppr)
+    seen, moving = 0, False
+    for r in list(el):
+        if r.tag != qn("w:r"):
+            if moving and r.tag != qn("w:pPr"):
+                new.append(r)
+            continue
+        ts = r.findall(qn("w:t"))
+        txt = "".join(t.text or "" for t in ts)
+        if moving:
+            new.append(r)
+        elif seen + len(txt) > pos:
+            cut = pos - seen
+            tail = copy.deepcopy(r)
+            for t in ts[1:]:
+                r.remove(t)
+            for t in tail.findall(qn("w:t"))[1:]:
+                tail.remove(t)
+            if ts:
+                ts[0].text = txt[:cut]
+                tt = tail.find(qn("w:t"))
+                tt.text = txt[cut:]
+                tt.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            new.append(tail)
+            moving = True
+        seen += len(txt)
+    # the colon and the spaces around the cut go: the heading ends at its label, the text starts at its first word
+    t = next((t for t in new.iter(qn("w:t")) if (t.text or "").strip()), None)
+    if t is not None:
+        t.text = re.sub(r"^\s*[:：]\s*", "", t.text)
+    el.addnext(new)
+    return new
+
+
+REVIEW_AUTHOR = "Course Review"       # the author annotate.py writes its comments as
+REVIEW_HIGHLIGHTS = {"red", "cyan", "green", "magenta"}   # red, turquoise, bright green, pink in annotate.py
+
+
+def drop_review_comments(d):
+    """Remove the comments an earlier Course Review run left in a re-uploaded copy (the creator's and reviewers'
+    own comments stay). Returns how many were removed."""
+    try:
+        part = d.part._comments_part
+    except Exception:
+        return 0
+    if part is None:
+        return 0
+    root = part.element
+    ids = set()
+    for c in list(root.findall(qn("w:comment"))):
+        if c.get(qn("w:author")) == REVIEW_AUTHOR:
+            ids.add(c.get(qn("w:id")))
+            root.remove(c)
+    if not ids:
+        return 0
+    body = d.element.body
+    for tag in ("w:commentRangeStart", "w:commentRangeEnd"):
+        for el in list(body.iter(qn(tag))):
+            if el.get(qn("w:id")) in ids:
+                el.getparent().remove(el)
+    for ref in list(body.iter(qn("w:commentReference"))):
+        if ref.get(qn("w:id")) in ids:
+            run = ref.getparent()
+            run.remove(ref)
+            if not [x for x in run if x.tag != qn("w:rPr")]:
+                run.getparent().remove(run)
+    return len(ids)
+
+
+BULLET_WHY = "numbering is only for the major headings; lists inside a section use bullets (Writing & Editing Guidelines)"
+
+
 def fix_docx(src, dst, ctx, doc, info):
-    """Write a fixed copy of one .docx; returns (lines for the summary comment, codes settled)."""
-    from .checks.formatting import doc_headings, grade_sizes, leading_number
+    """Write a fixed copy of one .docx; returns (lines for the summary comment, what was done, e.g. ticked)."""
+    from .checks.formatting import appendix_heading, doc_headings, grade_sizes, leading_number, misstyled_body
     from .checks.guidelines import lp_ranges
     d = Document(src)
     body = d.element.body
@@ -160,6 +332,9 @@ def fix_docx(src, dst, ctx, doc, info):
     if len(els) != len(info.paras):        # structure the parser read differently: do not risk a wrong mapping
         return [], {}
     lines, hr = [], ctx.profile.get("house_rules", {})
+    old_notes = drop_review_comments(d)
+    if old_notes:
+        lines.append(f"{old_notes} comment(s) from an earlier Course Review of this file removed; this review replaces them")
     urdu_font = (hr.get("urdu_fonts") or ["Noto Nastaliq Urdu"])[0]
     eng_font = (hr.get("english_fonts") or ["Poppins"])[0]
     grade, sz, _ = grade_sizes(ctx)
@@ -172,9 +347,17 @@ def fix_docx(src, dst, ctx, doc, info):
         s.top_margin = s.bottom_margin = s.left_margin = s.right_margin = Inches(1)
     lines.append("Page set to A4 portrait with 1-inch margins")
 
+    # changes to particular lines, each highlighted in the copy with what it was, why, and what it is now
+    changes = []                          # (element, before, why, now or None = the line as it now reads)
+
     # paragraph roles
     first = next((p for p in info.paras if p.text.strip() and not p.in_table), None)
     heads = doc_headings(ctx, info)
+    from .structure import of
+    st = structure_of = of(info)
+    if st is not None and st.kind == "lesson_plan":
+        # a heading in dispute is left as it is, with a comment; a section label with its text run on is split
+        heads = [p for p in info.paras if p.idx in st.agreed_headings or p.idx in st.run_in]
     head_ids = {p.idx for p in heads}
     levels, numbers = {}, {}
     secs = lp_ranges(ctx, info) if doc.doc_type == "lesson_plan" else {}
@@ -184,7 +367,9 @@ def fix_docx(src, dst, ctx, doc, info):
         top = {i for i, _ in starts}
         n1 = n2 = 0
         for p in heads:
-            if p.idx in top:
+            if appendix_heading(ctx, p.text):
+                levels[p.idx] = 1                 # a top-level heading the template leaves unnumbered
+            elif p.idx in top:
                 n1, n2 = n1 + 1, 0
                 levels[p.idx], numbers[p.idx] = 1, f"{n1}"
             elif n1:
@@ -194,8 +379,12 @@ def fix_docx(src, dst, ctx, doc, info):
                 n1 += 1
                 levels[p.idx], numbers[p.idx] = 1, f"{n1}"
     else:
-        for n, p in enumerate(heads, 1):
-            levels[p.idx], numbers[p.idx] = 1, f"{n}"
+        n = 0
+        for p in heads:
+            levels[p.idx] = 1
+            if not appendix_heading(ctx, p.text):
+                n += 1
+                numbers[p.idx] = f"{n}"
 
     digits = recoloured = flipped = quoted = 0
     for p, el in zip(info.paras, els):
@@ -233,7 +422,12 @@ def fix_docx(src, dst, ctx, doc, info):
                 continue
             if scripture or is_arabic_scripture(text):
                 quoted += 1
-                continue                  # Quran / hadith / dua text is quoted exactly: no font, size, digit or colour change
+                # Quran / hadith / dua text is quoted exactly: no font, size, digit or colour change. Only a review
+                # highlight an earlier Course Review run put on it goes, which leaves every letter as it was.
+                hl = r.find(qn("w:rPr") + "/" + qn("w:highlight"))
+                if hl is not None and hl.get(qn("w:val")) in REVIEW_HIGHLIGHTS:
+                    hl.getparent().remove(hl)
+                continue
             rpr = _rpr(r)
             ar, la = script_counts(text)
             if ar or la:
@@ -291,13 +485,40 @@ def fix_docx(src, dst, ctx, doc, info):
     if shaded:
         lines.append(f"Colour removed from {shaded} table cell(s)")
 
+    # running text that was set in a Heading style goes back to Normal
+    restyled = 0
+    for p in info.paras:
+        if misstyled_body(p, ctx) and not is_arabic_scripture(p.text) and p.idx not in head_ids:
+            ppr = els[p.idx].find(qn("w:pPr"))
+            if ppr is not None:
+                _drop(ppr, "w:pStyle")
+                _drop(ppr, "w:outlineLvl")
+                restyled += 1
+                changes.append((els[p.idx], f"running text set in the '{p.style}' style",
+                                "Heading styles are only for headings; text in a Heading style fills the navigation pane and the "
+                                "Table of Contents (Writing & Editing Guidelines)", "the Normal style, as body text"))
+    if restyled:
+        lines.append(f"{restyled} paragraph(s) of running text moved from a Heading style to Normal")
+
     # headings: built-in Heading styles and decimal numbers
     if heads:
         for p in heads:
             el = els[p.idx]
+            before_style, before_text = p.style, p.text.strip()
+            cut = run_in_split(ctx, p.text) if not is_arabic_scripture(p.text) else None
+            if cut is not None:
+                body_p = _split_paragraph(el, len(p.text) - len(p.text.lstrip()) + cut)
+                changes.append((body_p, f"this text ran on after the heading in the same paragraph ('{before_text[:50]}…')",
+                                "a heading stands on its own line and the text under it is body text (Writing & Editing Guidelines)",
+                                "its own paragraph under the heading, word for word"))
             st = _ensure_heading_style(d, levels[p.idx])
             ppr = el.find(qn("w:pPr"))
             _set(ppr, "w:pStyle", {"w:val": st.style_id})
+            if p.list_kind:                       # a list item turned heading keeps no list number of its own
+                _drop(ppr, "w:numPr")
+                off = _set(ppr, "w:numPr", {})
+                _set(off, "w:ilvl", {"w:val": "0"})
+                _set(off, "w:numId", {"w:val": "0"})
             ts = list(el.iter(qn("w:t")))
             if ts and number_heads and p.idx in numbers and not own_number(ctx, p.text):
                 old = leading_number(p.text)
@@ -307,13 +528,22 @@ def fix_docx(src, dst, ctx, doc, info):
                     text = re.sub(r"^\s*[\d٠-٩۰-۹]+(?:[.][\d٠-٩۰-۹]+)*[.)]?\s*", "", text)
                 first_t.text = f"{numbers[p.idx]} {text.lstrip()}"
                 first_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            numbered_now = number_heads and p.idx in numbers and not own_number(ctx, p.text)
+            if not p.heading_level or numbered_now and leading_number(before_text) != tuple(int(x) for x in numbers[p.idx].split(".")):
+                what = [] if p.heading_level else [f"the '{before_style}' style"]
+                if numbered_now:
+                    what.append("no decimal number" if leading_number(before_text) is None else "a different number")
+                changes.append((el, f"'{before_text[:60]}' with " + " and ".join(what),
+                                "headings use built-in Heading styles" + (" and decimal numbers 1, 1.1, 1.1.1" if numbered_now else "")
+                                + " (Writing & Editing Guidelines)", f"Heading {levels[p.idx]}" + (" with its number" if numbered_now else "")))
         lines.append(f"{len(heads)} heading(s) given Heading styles" + (" and decimal numbers (1, 1.1)" if number_heads else
                      "; not numbered, because the document does not follow the five Lesson Plan sections (see the comments)"))
 
     # numbered list items -> bullets (numbering is only for the major headings)
     bulleted = 0
+    disputed = structure_of.disputed_headings if structure_of is not None and structure_of.kind == "lesson_plan" else set()
     for p in info.paras:
-        if p.text.strip() and not p.in_table and p.idx not in head_ids and p.list_kind == "decimal":
+        if p.text.strip() and not p.in_table and p.idx not in head_ids and p.idx not in disputed and p.list_kind == "decimal":
             el = els[p.idx]
             ppr = el.find(qn("w:pPr"))
             _drop(ppr, "w:numPr")
@@ -324,6 +554,7 @@ def fix_docx(src, dst, ctx, doc, info):
             if t is not None:
                 t.text = "• " + t.text.lstrip()
             bulleted += 1
+            changes.append((el, f"item {p.num_label or ''} in a numbered list".replace("  ", " "), BULLET_WHY, "a bullet"))
     # SLO items written as plain paragraphs -> bullets (LP5)
     if doc.doc_type == "lesson_plan":
         from .checks.lessonplan import lp5
@@ -332,8 +563,28 @@ def fix_docx(src, dst, ctx, doc, info):
             if p.text.strip() in plain and p.list_kind != "decimal":
                 t = next((t for t in els[p.idx].iter(qn("w:t")) if (t.text or "").strip()), None)
                 if t is not None:
-                    t.text = "• " + t.text.lstrip()
+                    typed = re.match(r"^\s*\(?[\d٠-٩۰-۹]+[.)]\s*", t.text)
+                    t.text = "• " + (t.text[typed.end():] if typed else t.text.lstrip())   # a typed '1.' is the list number, not the text
                     bulleted += 1
+                    changes.append((els[p.idx], f"SLO '{p.text.strip()[:50]}' " + ("numbered by hand" if typed else "written as a plain paragraph"),
+                                    "SLOs are listed as bullets (Lesson Plan Guidelines)", "a bullet"))
+    # Key Takeaways written as plain paragraphs -> bullets (LPG2)
+    if doc.doc_type == "lesson_plan":
+        from .checks.guidelines import _is_bullet, takeaway_paras
+        from .checks.lessonplan import is_bullet_text
+        items = [p for p in (takeaway_paras(ctx, info) or []) if p.idx not in head_ids and p.text.strip()]
+        if items and not any(_is_bullet(p) for p in items):
+            for p in items:
+                if p.list_kind == "decimal" or is_bullet_text(p.text):
+                    continue                              # handled above, or already a bullet
+                t = next((t for t in els[p.idx].iter(qn("w:t")) if (t.text or "").strip()), None)
+                if t is None:
+                    continue
+                typed = re.match(r"^\s*\(?[\d٠-٩۰-۹]+[.)]\s*", t.text)
+                t.text = "• " + (t.text[typed.end():] if typed else t.text.lstrip())
+                bulleted += 1
+                changes.append((els[p.idx], f"Key Takeaway '{p.text.strip()[:50]}' " + ("numbered by hand" if typed else "written as a plain paragraph"),
+                                "Key Takeaways recap the lesson in bullets (Lesson Plan Guidelines)", "a bullet"))
     if bulleted:
         lines.append(f"{bulleted} numbered or plain list item(s) turned into bullets")
 
@@ -353,6 +604,8 @@ def fix_docx(src, dst, ctx, doc, info):
                     if _run_text(r).strip():
                         _set(_rpr(r), "w:highlight", {"w:val": "yellow"})
                 ticked += 1
+                changes.append((el, "the correct answer was marked with a check mark",
+                                "the template marks the correct answer with a yellow highlight", "highlighted yellow, check mark removed"))
         if ticked:
             lines.append(f"{ticked} correct answer(s) marked with a check mark now highlighted yellow instead")
 
@@ -368,11 +621,18 @@ def fix_docx(src, dst, ctx, doc, info):
         if tbl is None:
             continue
         head = next((info.paras[i].text.strip() for i in t.para_idx if info.paras[i].text.strip()), "")
+        i = t.prev_para
+        while i is not None and i >= 0 and not info.paras[i].text.strip() and not info.paras[i].in_table:
+            i -= 1
+        if i is not None and i >= 0 and i in head_ids:
+            head = re.sub(r"^\s*[\d٠-٩۰-۹]+(?:\.[\d٠-٩۰-۹]+)*[.)]?\s*", "", info.paras[i].text.strip())   # the heading it sits under names it
         cap = _new_para(f"{word} {n}: {head[:50]}".rstrip(": "), info.language, ctx, sz["caption"], italic=True)
         tbl.addprevious(cap)
         captions += 1
+        changes.append((cap, "the table had no caption", "every table has a numbered caption directly above it (Writing & Editing "
+                        "Guidelines); the title is taken from the heading above or the first cell, so check it", None))
     if captions:
-        lines.append(f"{captions} numbered table caption(s) added above the tables (titles taken from each table's first cell; check them)")
+        lines.append(f"{captions} numbered table caption(s) added above the tables (titles taken from the heading above or the table's first cell; check them)")
 
     # Table of Contents for a Lesson Plan longer than two pages
     if doc.doc_type == "lesson_plan" and heads and not info.has_toc:
@@ -404,11 +664,16 @@ def fix_docx(src, dst, ctx, doc, info):
             for x in (r1, r2, r3, r4, r5):
                 toc.append(x)
             els[first.idx].addnext(toc)
+            changes.append((toc, "no Table of Contents", "a Lesson Plan longer than two pages starts with one (Writing & Editing "
+                            "Guidelines)", "a Table of Contents; Word fills it in when the file is opened (choose Yes when asked to update fields)"))
             settings = d.settings.element
             _set(settings, "w:updateFields", {"w:val": "true"})
             lines.append("Table of Contents inserted after the title (Word fills it in when the file is opened)")
     d.save(dst)
-    return lines, {"ticked": ticked, "toc": any("Table of Contents" in l for l in lines), "numbered": number_heads}
+    done = [{"text": "".join(t.text or "" for t in el.iter(qn("w:t"))).strip(), "before": before, "why": why,
+             "now": now or "".join(t.text or "" for t in el.iter(qn("w:t"))).strip()} for el, before, why, now in changes]
+    return lines, {"ticked": ticked, "toc": any("Table of Contents" in l for l in lines), "numbered": number_heads,
+                   "changes": [c for c in done if c["text"]]}
 
 
 def _ppr_of(p):
@@ -471,7 +736,7 @@ def _nth_table(body, idx):
 
 
 def add_footer(path, name, version):
-    """Footer with document name, version, date and page number on every section."""
+    """Footer with document name, version (left out when there is none), date and page number on every section."""
     d = Document(path)
     for s in d.sections:
         f = s.footer
@@ -479,7 +744,7 @@ def add_footer(path, name, version):
         for p in list(f.paragraphs):
             p._p.getparent().remove(p._p)
         p = f.add_paragraph()
-        p.add_run(f"{name} | v{version} | {date.today().isoformat()} | Page ")
+        p.add_run(f"{name}" + (f" | v{version}" if version else "") + f" | {date.today().isoformat()} | Page ")
         fld = OxmlElement("w:fldSimple")
         fld.set(qn("w:instr"), "PAGE")
         r = OxmlElement("w:r")

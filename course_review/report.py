@@ -26,11 +26,15 @@ def write_outputs(pkg, res, rules, layout, checklist_path, out_dir, zip_name, mo
     if model is None:
         model_line = "Off. Every result came from the rule-based parser."
     else:
-        used = [s for s in res.model_stats if s.get("usable") and not s.get("cached")]
-        cached = [s for s in res.model_stats if s.get("usable") and s.get("cached")]
-        failed = [s for s in res.model_stats if not s.get("usable")]
+        regions = [s for s in res.model_stats if not s.get("structure")]
+        read = [s for s in res.model_stats if s.get("structure")]
+        used = [s for s in regions if s.get("usable") and not s.get("cached")]
+        cached = [s for s in regions if s.get("usable") and s.get("cached")]
+        failed = [s for s in regions if not s.get("usable")]
+        structure_line = (f"Structure read by the model for {sum(1 for s in read if s.get('usable'))} of {len(read)} Lesson Plan(s) and "
+                          f"Facilitator's Guide(s)" + ("; the others used the parser alone. " if any(not s.get("usable") for s in read) else ". ")) if read else ""
         checks = ("model checks: " + ("all" if model.codes is None else ",".join(sorted(model.codes))) + ". ") if model.judge else ""
-        model_line = (f"{model.mode} mode, {model.client.model} at {model.client.url}. {checks}"
+        model_line = (f"{model.mode} mode, {model.client.model} at {model.client.url}. {checks}{structure_line}"
                       f"{len(used) + len(cached)} document region(s) recovered ({len(cached)} from cache), "
                       f"{len(failed)} could not be recovered. Findings from it are tagged [model-assisted].")
     meta = {

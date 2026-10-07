@@ -35,6 +35,7 @@ GUIDE_RULES = {
     "SB5": "On-screen text is key terms and short labels, not full sentences (Storyboarding Guidelines)",
     "WEG1": "8 pt space after each paragraph (Writing & Editing Guidelines, page setup)",
     "WEG2": "Lists inside a section use bullets; numbering is only for the major headings (Writing & Editing Guidelines)",
+    "STR1": "The model and the formatting rules disagree whether a line is a heading; the tool left it as it is",
 }
 
 
@@ -71,6 +72,11 @@ def lpg1(ctx, doc, info):
     qlabel = re.compile(r"^\s*[•\-–—*]?\s*(?:" + "|".join(re.escape(normalize(x)) for x in ctx.profile["vocab"]["question_prefixes"]) + r")\s*\d",
                         re.I)
     qs = [p for p in _paras(info, r) if re.search(r"[?؟]", p.text) or qlabel.match(to_western_digits(normalize(p.text)))]
+    from ..structure import of
+    st = of(info)
+    if st is not None:
+        mq = [info.paras[i] for i in st.lists.get("warm_up_questions", [])]
+        qs = mq or qs
     if not qs:
         return result("LPG1", REVIEW, "No question was found in the Warm-up (it may be an activity without questions)")
     if len(qs) > 3:
@@ -79,11 +85,22 @@ def lpg1(ctx, doc, info):
     return result("LPG1", PASS, f"The Warm-up has {len(qs)} question(s)")
 
 
-def lpg2(ctx, doc, info):
+def takeaway_paras(ctx, info):
+    """The Key Takeaways items, or None when the section was not found."""
     r = lp_ranges(ctx, info).get("key_takeaways")
     if not r:
+        return None
+    from ..structure import of
+    st = of(info)
+    if st is not None and st.lists.get("takeaway_items"):
+        return [info.paras[i] for i in st.lists["takeaway_items"]]
+    return [p for p in _paras(info, r) if not p.in_table]     # the coverage table after it is not a takeaway
+
+
+def lpg2(ctx, doc, info):
+    ps = takeaway_paras(ctx, info)
+    if ps is None:
         return result("LPG2", REVIEW, "The Key Takeaways section was not found")
-    ps = _paras(info, r)
     bullets = [p for p in ps if _is_bullet(p)]
     numbered = [p for p in ps if _is_numbered(p)]
     if numbered:
@@ -91,7 +108,7 @@ def lpg2(ctx, doc, info):
                       marks=[mark(p.text, "numbered; Key Takeaways are written as bullets") for p in numbered])
     if not bullets:
         return result("LPG2", FAIL, "Key Takeaways are not written as bullets",
-                      marks=[mark(ps[0].text, "Key Takeaways are written as bullets")] if ps else [])
+                      marks=[mark(ps[0].text, "not a bullet; Key Takeaways are written as bullets")] if ps else [])
     return result("LPG2", PASS, f"Key Takeaways recap in {len(bullets)} bullets")
 
 
@@ -225,7 +242,12 @@ def fgg3(ctx, doc, info):
 
 
 def fg4(ctx, doc, info):
-    cb = [s for s in info.slides_text if any(l in normalize(s.title).lower() for l in CB_LABELS)]
+    from ..structure import of
+    st = of(info)
+    if st is not None:
+        cb = [s for s in info.slides_text if st.slide_roles.get(s.index) == "concept_building"]
+    else:
+        cb = [s for s in info.slides_text if any(l in normalize(s.title).lower() for l in CB_LABELS)]
     if not cb:
         return result("FG4", REVIEW, "No Concept Building slide was recognised by its title")
     no_notes, gaps = [], {}

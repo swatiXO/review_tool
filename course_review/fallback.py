@@ -227,6 +227,7 @@ class ModelConfig:
     stats: list = field(default_factory=list)
     judge: bool = False                # also run the model-assisted judgement checks (judgement.py)
     codes: object = None               # None = every judgement check, or a set of codes such as {"LP1", "FG1"}
+    structure: bool = True             # the model reads Lesson Plan and Facilitator's Guide structure (structure.py)
 
     def wants(self, code: str) -> bool:
         return self.judge and (self.codes is None or code in self.codes)

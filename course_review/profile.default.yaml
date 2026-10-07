@@ -59,6 +59,15 @@ vocab:
     10: ["دہم", "tenth", "ten"]
   variant_letters: {"الف": "A", "ب": "B", "ج": "C", "د": "D"}
   question_region_end_labels: ["اساتذہ", "Teacher", "Facilitator", "رہنمائے", "تشخیصی رہنمائی", "Answer Key", "Marking guide", "جوابات", "Guidance"]
+  # extra slide names for the Lesson Plan sections in a Facilitator's Guide (FG7): the guide's own
+  # structure is Cover / Session Overview / Introduction / Warm-up / Concept Building / Recap / Close
+  fg_section_labels:
+    slos: ["Session Overview", "Lesson SLOs", "Lesson at a glance", "سیشن کا جائزہ", "سیشن کا خلاصہ", "سبق پر ایک نظر"]
+    key_takeaways: ["Recap", "Summary", "خلاصہ", "اعادہ"]
+  # lines that are notes or instructions, never the start of a Lesson Plan section
+  note_labels: ["Tip", "Remember", "Instructions for", "General instructions", "طلبہ کے لیے", "برائے طلبہ", "عمومی ہدایات", "ہدایت برائے"]
+  # headings after the five sections that the templates leave unnumbered
+  appendix_headings: ["Book and SLO Coverage", "Book & SLO Coverage", "کتاب اور SLO", "کتاب اور حاصلات", "References", "Reference List", "حوالہ جات"]
   facilitator_note_labels: ["Facilitator Notes", "Facilitator Note", "Facilitator tip", "Teacher note",
                             "مقرر کے لیے نوٹ", "مقرر کے لیے مشورہ"]
   reference_list_labels: ["References", "Reference List", "Bibliography", "حوالہ جات"]

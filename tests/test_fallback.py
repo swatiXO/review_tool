@@ -187,7 +187,8 @@ def test_end_to_end_with_model_fallback(tmp_path):
     summary = {r[0].value: r[1].value for r in wb["Review Summary"].iter_rows(min_row=2, max_row=12) if r[0].value}
     assert "suggest mode" in summary["Model fallback"]
     data = json.load(open(tmp_path / "out" / "review.json", encoding="utf8"))
-    assert data["model_calls"] and data["model_calls"][0]["usable"]
+    quiz = [c for c in data["model_calls"] if not c.get("structure")]
+    assert quiz and quiz[0]["usable"]
 
 
 def test_end_to_end_without_model_is_unchanged_and_says_so(tmp_path):

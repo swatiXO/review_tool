@@ -24,7 +24,7 @@ python -m course_review.cli review PACKAGE.zip  --out review-output
 
 | Output | What it is |
 |---|---|
-| `Marked-up-documents.zip` | **The package itself, fixed and marked up.** Rules with one right answer are applied to the copies: A4, 1-inch margins, 1.15 spacing and 8 pt after; Noto Nastaliq / Poppins; the guideline's sizes for the grade; Western digits; text direction; Heading styles and decimal numbers; table captions; bullets instead of numbered lists; no colour (yellow correct answers kept, check marks turned into yellow); footer with name, version, date and page; a Table of Contents in long Lesson Plans; the file renamed to the guideline pattern. On slides: 1.5 spacing, fonts, digits, colour and a footer. The first comment in each file lists what was fixed. **What needs a person stays highlighted with a comment.** Every Word file has its problems highlighted in the text: red = fails the checklist, turquoise = a model suggestion for a reviewer to decide, green = passes. Each highlight carries a Word comment naming the checklist code and the reason, and a comment on the first paragraph lists the whole-document results (fonts, page size, file name). Existing highlights are never replaced, so yellow correct answers stay yellow. Slides get the highlight plus a red-bordered "Course Review notes" box. Results that belong to no single file (a missing Data Bank, subject-wide coverage) are in `REVIEW-NOTES.txt`. |
+| `Marked-up-documents.zip` | **The package itself, fixed and marked up.** Rules with one right answer are applied to the copies: A4, 1-inch margins, 1.15 spacing and 8 pt after; Noto Nastaliq / Poppins; the guideline's sizes for the grade; Western digits; text direction; Heading styles and decimal numbers; table captions; bullets instead of numbered lists; no colour (yellow correct answers kept, check marks turned into yellow); footer with name, version, date and page; a Table of Contents in long Lesson Plans; the file renamed to the guideline pattern, keeping the document's own version (from the file name, footer or file properties; a version is never made up, so a file without one keeps its WE3 comment). On slides: 1.5 spacing, fonts, digits, colour and a footer. The first comment in each file lists what was fixed. **What needs a person stays highlighted with a comment**: each fixed copy is checked again: a Fail or needs-reviewer result on a rule the fixer works on is left out only when the copy now passes that rule (it then has nothing left to review); every other needs-reviewer result, including all model suggestions, is kept. Every Word file has its problems highlighted in the text: red = fails the checklist, turquoise = a model suggestion for a reviewer to decide, pink = corrected by the tool (the comment says what it was, why it did not fit and what it is now), green = passes. A heading with its text run on ("Warm-up: ...") is split into the heading and a paragraph, word for word. A file uploaded again after an earlier review loses that review's comments and highlights first; people's own comments stay. Each highlight carries a Word comment naming the checklist code and the reason, and a comment on the first paragraph lists the whole-document results (fonts, page size, file name). Existing highlights are never replaced, so yellow correct answers stay yellow. Slides get the highlight plus a red-bordered "Course Review notes" box. Results that belong to no single file (a missing Data Bank, subject-wide coverage) are in `REVIEW-NOTES.txt`. |
 | `Course-Review-Checklist-filled.xlsx` | Your own workbook, one row per lesson / chapter. **A blank cell means the tool did not decide it**; the Notes column says why. Extra sheets: `Review Summary` (what the tool decides, per code) and `SLO Coverage`. |
 | `report.html` | Subject-level results with per-document evidence, per-lesson grids, SLO coverage, package inventory. |
 | `review.json` | Every finding with status, message, evidence, the document it came from, and whether a model helped. |
@@ -40,7 +40,8 @@ Open the `Review Summary` sheet, or read `course_review/checks/registry.py`. Eac
 * **Partly**: the part code can judge is judged; the rest is stated in the Notes. A partial pass is
   written as a blank cell, never as Pass.
 * **Suggestion**: rules that need reading comprehension (LP1, LP2, LP6, LP7, LP8, LP9, FG1, FG3,
-  FG6, CE2, CE3, and SLO mapping for PQ5/WS5). Only with `--model-checks`. Always shown as
+  FG6, CE2, CE3, SLO mapping for PQ5/WS5, Bloom's levels for the CE1/WS1 split when questions do
+  not state their level, and feedback quality for PQ3/DB3). Only with `--model-checks`. Always shown as
   needs-review, never as Pass or Fail.
 * **No**: left to a person (logo placement, FG4's undefined "five items", FG5 video cues, WE19
   screenshots, WE24, ...).
@@ -80,7 +81,7 @@ set OLLAMA_URL=https://your-link.ngrok-free.dev        # PowerShell: $env:OLLAMA
 set OLLAMA_MODEL=qwen3.5:9b
 python -m course_review.cli check-model
 
-# 1. question formats the rules do not recognise
+# 1. the model reads each Lesson Plan's and Facilitator's Guide's structure; question formats the rules do not recognise
 python -m course_review.cli review PKG.zip --checklist X.xlsx --model-fallback suggest
 # 2. content checks (slow: about 10 model calls per lesson); optionally choose codes
 python -m course_review.cli review PKG.zip --checklist X.xlsx --model-checks LP1,LP6,FG1
@@ -88,7 +89,18 @@ python -m course_review.cli review PKG.zip --checklist X.xlsx --model-checks LP1
 python -m course_review.cli review PKG.zip --checklist X.xlsx --model-checks --book-index book_index
 ```
 
-The rule that never changes: **the model proposes, code verifies, and a model answer is never a Pass
+**Structure is read by the model.** With a model connected, it reads every Lesson Plan and
+Facilitator's Guide first: which paragraph starts each of the five sections (under any name, in
+Urdu or English), which lines are headings, which are SLOs, warm-up questions and takeaways, and
+which part of the lesson each slide is for. It answers only with paragraph and slide numbers, never
+with text, so every check and every correction uses the document's own words. Code verifies the
+reading (a section cannot start on the title, a list item, a "Note:" line or a "Duration: 40 min"
+line; a heading cannot be a long sentence, an answer-option line or a verse) and drops what fails.
+The structure rules (LP3, LP4, LP5, LPG1, LPG2, WE12, WE13, FG4, FG7) are then decided on that
+reading. The label-word parser is used only when no model is connected, and to fill in a section
+the model did not see whose label opens a line. Takes about 10-30 seconds per document; cached.
+
+For everything else the rule is: **the model proposes, code verifies, and a model answer is never a Pass
 or Fail in the workbook.** A proposal counts only if its quoted words appear, word for word, in the
 material it was given; otherwise it is thrown away. With the model off (the default) nothing
 changes. If the link is down the run stops with a clear message instead of quietly skipping it.

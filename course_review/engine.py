@@ -8,6 +8,7 @@ up as 'not automated' in the summary.
 import re
 from collections import Counter, defaultdict
 
+from . import structure
 from .checks import assessments, coverage, formatting, guidelines, judgement, lessonplan, slides
 from .checks.common import result
 from .checks.registry import AUTOMATION
@@ -104,6 +105,23 @@ def cell_note(findings):
     return " | ".join(parts)
 
 
+DERIVED = {"LP10": LP10_COMPONENTS, "FG8": FG8_COMPONENTS}
+
+
+def derived_finding(code, comp):
+    """LP10 / FG8 from the findings of the rules they cover on one document; None when none of them ran."""
+    if not comp:
+        return None
+    fails = [f for f in comp if f.status == FAIL]
+    if fails:
+        msg = "; ".join(f"{f.code}: {f.message}" for f in fails[:3])
+        return result(code, FAIL, msg, [f"{f.code}: {f.message}" for f in fails])
+    if all(f.status in (PASS, NA) and not f.partial for f in comp):
+        return result(code, PASS, "All formatting rules this item covers pass")
+    return result(code, REVIEW, "No failures; some parts need a reviewer: " +
+                  ", ".join(f"{f.code}" for f in comp if f.status == REVIEW or f.partial))
+
+
 class Results:
     def __init__(self):
         self.findings = []
@@ -113,6 +131,8 @@ class Results:
         self.errors = {}
         self.slo_map = []
         self.model_stats = []
+        self.rules = {}            # code -> Rule, as read from the checklist workbook
+        self.markup = None         # what annotate.annotate_package wrote (see its stats)
 
 
 def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
@@ -126,6 +146,12 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
 
     # 1. per-document formatting + structure
     doc_findings = defaultdict(list)    # code -> [Finding]
+    if model is not None and getattr(model, "structure", True):
+        readable = [d for d in formatted if (d.doc_type, d.ext) in (("lesson_plan", "docx"), ("facilitator_guide", "pptx"))]
+        for n, d in enumerate(readable, 1):
+            say("Reading document structure", n, len(readable))
+            info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
+            structure.attach(ctx, d, info)
     for n, d in enumerate(formatted, 1):
         say("Checking documents", n, len(formatted))
         info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
@@ -149,6 +175,9 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
                 f = fn(ctx, d, info)
                 f.doc, f.lesson = d.rel, d.key
                 F.append(f)
+        for f in structure.heading_findings(ctx, info):
+            f.doc, f.lesson = d.rel, d.key
+            F.append(f)
         if d.doc_type == "lesson_plan" and d.ext == "docx":
             for code, fn in lessonplan.DOC_CHECKS.items():
                 f = fn(ctx, d, info)
@@ -181,6 +210,8 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
         if f.code in ("ST1", "ST2"):
             doc_findings[f.code].append(f)
     judgement.augment_coverage(ctx, F)
+    judgement.augment_levels(ctx, F)
+    judgement.augment_feedback(ctx, F)
     if model is not None and model.judge:
         say("Asking the model about the content", 0, 0)
     F.extend(judgement.judgement_findings(ctx))
@@ -200,8 +231,8 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
         if k not in have["facilitator_guide"]:
             missing.append((lesson_label(pkg, k), "Facilitator Guide"))
         if k not in have["chapter_exam"]:
-            F.append(result("CE1", FAIL, "No Chapter Exam (per-lesson assessment) file found for this lesson", lesson=k))
-            missing.append((lesson_label(pkg, k), "Chapter Exam (per-lesson assessment)"))
+            F.append(result("CE1", FAIL, "No Assessment file found for this lesson (the workbook's \"Chapter Exam\" sheet)", lesson=k))
+            missing.append((lesson_label(pkg, k), "Assessment"))
     # An upload of single lessons carries no chapter-level files; that is not a missing Chapter Exam.
     lessons_only = not any(d.scope in ("chapter", "subject") for d in pkg.docs)
     for ch in chapters:
@@ -215,18 +246,10 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
     # 4. derived LP10 / FG8
     def derive(code, components, doc_type):
         for d in [x for x in formatted if x.doc_type == doc_type]:
-            comp = [f for f in F if f.doc == d.rel and f.code in components]
-            if not comp:
-                continue
-            fails = [f for f in comp if f.status == FAIL]
-            if fails:
-                msg = "; ".join(f"{f.code}: {f.message}" for f in fails[:3])
-                F.append(result(code, FAIL, msg, [f"{f.code}: {f.message}" for f in fails], lesson=d.key, doc=d.rel))
-            elif all(f.status in (PASS, NA) and not f.partial for f in comp):
-                F.append(result(code, PASS, "All formatting rules this item covers pass", lesson=d.key, doc=d.rel))
-            else:
-                F.append(result(code, REVIEW, "No failures; some parts need a reviewer: " +
-                                ", ".join(f"{f.code}" for f in comp if f.status == REVIEW or f.partial), lesson=d.key, doc=d.rel))
+            f = derived_finding(code, [f for f in F if f.doc == d.rel and f.code in components])
+            if f is not None:
+                f.lesson, f.doc = d.key, d.rel
+                F.append(f)
     derive("LP10", LP10_COMPONENTS, "lesson_plan")
     derive("FG8", FG8_COMPONENTS, "facilitator_guide")
 
@@ -304,4 +327,5 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
     res.errors = ctx.errors
     res.model_stats = list(model.stats) if model is not None else []
     res.lesson_keys, res.chapters = lesson_keys, chapters
+    res.ctx = ctx
     return res

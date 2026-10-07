@@ -31,8 +31,12 @@ RANK = {FAIL: 3, REVIEW: 2, PASS: 1}
 WORD_COLOUR = {FAIL: WD_COLOR_INDEX.RED, REVIEW: WD_COLOR_INDEX.TURQUOISE, PASS: WD_COLOR_INDEX.BRIGHT_GREEN}
 SLIDE_COLOUR = {FAIL: "FF0000", REVIEW: "00FFFF", PASS: "00FF00"}
 LABEL = {FAIL: "FAIL", REVIEW: "CHECK", PASS: "PASS"}
+CHANGED = "changed"                   # a line the tool corrected in this copy
+WORD_COLOUR[CHANGED] = WD_COLOR_INDEX.PINK
+COLOUR_ORDER = {FAIL: 4, REVIEW: 3, CHANGED: 2, PASS: 1}
 LEGEND = ("Red = fails the checklist. Turquoise = the model's suggestion: each one has a comment saying what to do "
-          "(you confirm or reject it, then delete it). Green = passes.")
+          "(you confirm or reject it, then delete it). Pink = corrected by the tool: the comment says what it was, why it "
+          "did not fit, and what it is now. Green = passes.")
 ACTION = {
     "pass": "Your call: if you agree it passes, delete this comment and the highlight. If not, replace it with your own "
             "comment to the creator saying what is missing.",
@@ -140,9 +144,10 @@ def _text_runs(par):
     return [r for r in par.runs if r.text.strip()]
 
 
-def annotate_docx(src, dst, findings, fixed=None):
+def annotate_docx(src, dst, findings, fixed=None, changes=None):
     """Write a marked-up copy of one .docx; returns how many paragraphs were marked. `fixed` lists what
-    the tool already corrected in this copy, for the summary comment."""
+    the tool already corrected in this copy, for the summary comment; `changes` are the lines it corrected
+    (autofix.fix_docx), each highlighted pink with what it was, why, and what it is now."""
     doc = Document(src)
     paras = _all_paragraphs(doc)
     loose = [_loose(p.text) for p in paras]
@@ -152,20 +157,35 @@ def annotate_docx(src, dst, findings, fixed=None):
         placed, used = False, set()
         model = f.method == "model"
         marks = f.marks
-        if model and ("PASS" in (marks[0].get("note", "") if marks else "") or "Would be pass" in f.message):
+        if model and ("PASS" in (marks[0].get("note", "") if marks else "") or "Would be pass" in f.message) \
+                and len({m.get("note") for m in marks}) <= 1:
             marks = marks[:1]             # a suggested pass needs one place to confirm it, not every passage it read
-        suggested_pass = model and marks is not f.marks
+                                          # (marks with different notes are different claims, and each is shown)
+        suggested_pass = model and (marks is not f.marks or len(marks) == 1)
+        notes_seen = set()
         for m in marks:
             hits = _locate(m, loose, used)
             if suggested_pass:
                 hits = hits[:1]               # a quote can span paragraphs (a table); one place is enough to confirm a pass
             for i in hits:
-                lines = _model_lines(f, m.get("note"), not placed) if model else [_line(f, m.get("note"))]
+                new_claim = m.get("note") not in notes_seen      # a different note is a claim of its own, explained in full
+                lines = _model_lines(f, m.get("note"), new_claim) if model else [_line(f, m.get("note"))]
                 for l in lines:
                     per_para[i].append((f.status, l))
                 placed = True
+                notes_seen.add(m.get("note"))
         if not placed and f.status != PASS:
             unplaced.append(f)
+
+    used_c = set()
+    raw = [normalize(p.text).strip() for p in paras]
+    for c in changes or []:
+        want = normalize(c["text"]).strip()
+        same = [i for i, t in enumerate(raw) if t == want and i not in used_c]     # the very line first, then a looser match
+        hits = same[:1] or _locate({"text": c["text"], "exact": True}, loose, used_c)[:1]
+        used_c.update(hits)
+        for i in hits:
+            per_para[i].append((CHANGED, f"Corrected by the tool. Before: {c['before']}. Why: {c['why']}. Now: {c['now']}."))
 
     for i, items in sorted(per_para.items()):
         runs = _text_runs(paras[i])
@@ -174,7 +194,7 @@ def annotate_docx(src, dst, findings, fixed=None):
             per_para[i] = []
             unplaced.extend(_Note(l) for l in unplaced_lines)
             continue
-        colour = WORD_COLOUR[_worst(s for s, _ in items)]
+        colour = WORD_COLOUR[max((s for s, _ in items), key=lambda s: COLOUR_ORDER.get(s, 0))]
         for r in runs:
             if r.font.highlight_color is None and r._r.find(qn("w:rPr") + "/" + qn("w:shd")) is None:
                 r.font.highlight_color = colour
@@ -192,9 +212,12 @@ def annotate_docx(src, dst, findings, fixed=None):
         if problems:
             lines.append("Whole-document results:")
             lines += [f"- {_line(f)}" for f in problems]
-        marked = sum(1 for v in per_para.values() if v)
+        marked = sum(1 for v in per_para.values() if any(s != CHANGED for s, _ in v))
+        pink = sum(1 for v in per_para.values() if v and all(s == CHANGED for s, _ in v))
         lines.append(f"{marked} paragraph(s) are highlighted in the text below for a person to check."
                      if marked else "Nothing in the text itself needs a person's attention.")
+        if pink:
+            lines.append(f"{pink} more line(s) are pink: corrected by the tool, each with a comment. Delete those comments once you have looked.")
         _comment(doc, _text_runs(first)[:1], lines)
     doc.save(dst)
     return sum(1 for v in per_para.values() if v)
@@ -302,7 +325,7 @@ def _shapes(shapes):
 
 # ------------------------------------------------------------------------ package
 
-def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True):
+def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True, ctx=None):
     """Zip of the whole package with each .docx/.pptx fixed where the rules are mechanical and
     commented where a person must decide, plus REVIEW-NOTES.txt."""
     from . import autofix
@@ -311,13 +334,17 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
     loose_ends = []
     for f in findings:
         (by_doc[f.doc] if f.doc else loose_ends).append(f)
-    ctx = None
-    if fix and profile is not None:
+    if not fix:
+        ctx = None
+    elif ctx is None and profile is not None:       # the review's own context carries what the model read
         from .engine import Context
         ctx = Context(pkg, profile, rules or {})
     grade_subject = re.sub(r"[^A-Za-z0-9]+", "-", pkg.subject or "").strip("-")
     work = Path(tempfile.mkdtemp(prefix="course-markup-"))
-    stats = {"documents": 0, "paragraphs": 0, "errors": {}, "renamed": {}}
+    # "open": (path inside the package, finding) for every Fail / needs-reviewer result still standing in the
+    # copies handed out, under the copy's new name; results tied to no file have path None.
+    stats = {"documents": 0, "paragraphs": 0, "errors": {}, "renamed": {}, "open": []}
+    written = {}                              # original path -> (path of the copy, findings written into it)
     try:
         tree = work / root.name
         shutil.copytree(root, tree)
@@ -327,18 +354,22 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                 continue
             dst = tree / d.rel
             try:
-                fixed_lines, extra, src = [], {}, d.abs
+                fixed_lines, extra, src, changes = [], {}, d.abs, []
                 if ctx is not None:
-                    name = autofix.new_name(d, grade_subject)
+                    info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
+                    version, found_in = autofix.find_version(d, info)
+                    name = autofix.new_name(d, grade_subject, version)
+                    base = name.rsplit(".", 1)[0] if name else Path(d.rel).stem
+                    if version:                   # the footer shows the version once, in its own field
+                        base = re.sub(r"[\s_-]*(?:v|version\s*)" + re.escape(version) + r"\b.*$", "", base, flags=re.I).strip(" -_") or base
                     staged = work / ("fixed." + d.ext)
                     if d.ext == "docx":
-                        info = ctx.docx(d)
                         if info is not None:
                             fixed_lines, extra = autofix.fix_docx(d.abs, staged, ctx, d, info)
+                            changes = extra.get("changes", [])
                     else:
-                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)\.pptx$", name or "")
-                        footer = f"{m.group(1)} | v{m.group(2)} | {date.today().isoformat()}" if m else None
-                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer)
+                        footer = f"{base}" + (f" | v{version}" if version else "") + f" | {date.today().isoformat()}"
+                        fixed_lines = autofix.fix_pptx(d.abs, staged, ctx, footer if name else None)
                     if fixed_lines:
                         src = str(staged)
                     if name and name != dst.name:
@@ -347,12 +378,14 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                         stats["renamed"][d.rel] = name
                         fixed_lines.append(f"File renamed to {name} (pattern [Type]-[Identifier]-[Chapter]-v[Version])")
                     if d.ext == "docx" and src == str(staged):
-                        base = dst.stem                                   # e.g. Lesson-Plan-Lesson-1-Chapter-2-v0.1
-                        m = re.match(r"(.*)-v(\d+(?:\.\d+)*)$", base)
-                        autofix.add_footer(src, m.group(1) if m else base, m.group(2) if m else "0.1")
-                        fixed_lines.append("Footer added: document name, version, date, page number")
-                    fs = [f for f in fs if not autofix.settled(f, d.ext, d.doc_type, extra)]
-                n = (annotate_docx if d.ext == "docx" else annotate_pptx)(src, dst, fs, fixed_lines)
+                        autofix.add_footer(src, base, version)
+                        fixed_lines.append("Footer added: document name, " + ("version, " if version else "") + "date, page number")
+                    if name and version and found_in != "the file name":
+                        fixed_lines.append(f"Version v{version} taken from {found_in}")
+                    rel = (d.rel.rsplit("/", 1)[0] + "/" if "/" in d.rel else "") + dst.name
+                    fs = autofix.remaining(fs, d.ext, autofix.recheck(ctx, d, src, rel), extra)
+                n = annotate_docx(src, dst, fs, fixed_lines, changes) if d.ext == "docx" else annotate_pptx(src, dst, fs, fixed_lines)
+                written[d.rel] = (dst.relative_to(tree).as_posix(), fs)
                 stats["documents"] += 1
                 stats["paragraphs"] += n
             except Exception as e:   # a file the libraries cannot rewrite stays as it was, and says so
@@ -360,6 +393,11 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True)
                 stats["errors"][d.rel] = f"{type(e).__name__}: {e}"
                 loose_ends.append(_Note(f"{d.rel}: could not be fixed or marked up ({type(e).__name__}); its results are below"))
                 loose_ends.extend(f for f in fs if f.status in (FAIL, REVIEW))
+                written[d.rel] = (d.rel, by_doc.get(d.rel, []))
+        for rel, fs in by_doc.items():
+            path, fs = written.get(rel, (rel, fs))
+            stats["open"].extend((path, f) for f in fs if f.status in (FAIL, REVIEW) and getattr(f, "code", ""))
+        stats["open"].extend((None, f) for f in findings if not f.doc and f.status in (FAIL, REVIEW) and getattr(f, "code", ""))
         (tree / "REVIEW-NOTES.txt").write_text(_notes_text(loose_ends, pkg, rules, stats["renamed"]), encoding="utf-8")
         out_zip = Path(out_zip)
         out_zip.parent.mkdir(parents=True, exist_ok=True)

@@ -112,9 +112,9 @@ def test_review_writes_a_marked_up_zip_with_notes(tmp_path):
     z = zipfile.ZipFile(out / cli.MARKED_UP)
     names = z.namelist()
     assert any(n.endswith("REVIEW-NOTES.txt") for n in names)
-    assert any(n.endswith("Lesson-Plan-Lesson-1-Chapter-1-v0.1.docx") for n in names)      # renamed to the pattern
+    assert any(n.endswith("Lesson-Plan-Lesson-1-Chapter-1.docx") for n in names)      # renamed to the pattern
     assert not any(n.endswith("Lesson-1-Chapter-1-Lesson-Plan.docx") for n in names)
-    lp = next(n for n in names if n.endswith("Lesson-Plan-Lesson-1-Chapter-1-v0.1.docx"))
+    lp = next(n for n in names if n.endswith("Lesson-Plan-Lesson-1-Chapter-1.docx"))
     (tmp_path / "lp.docx").write_bytes(z.read(lp))
     top = comment_texts(tmp_path / "lp.docx")[-1]
     assert "Fixed by the tool" in top and "A4" in top
@@ -138,3 +138,22 @@ def test_every_turquoise_highlight_has_a_comment_that_says_what_to_do(tmp_path):
     assert any("model suggests PASS" in t and "delete this comment" in t for t in texts)
     assert any("model suggests FAIL" in t and "reword this as a suggestion" in t for t in texts)
     assert sum(1 for t in texts if t.startswith("LP7")) == 2                                    # each FAIL place commented
+
+
+def test_a_re_uploaded_copy_loses_the_earlier_review_but_keeps_peoples_comments(tmp_path):
+    from course_review import autofix
+    d = new_doc()
+    add(d, "Introduction", bold=True)
+    add(d, "Body text of the lesson.")
+    src = save(d, tmp_path)
+    first = tmp_path / "first.docx"
+    annotate.annotate_docx(src, first, [result("WE12", FAIL, "x", marks=[mark("Introduction", "no number")])])
+    doc = Document(first)
+    doc.add_comment(doc.paragraphs[1].runs, text="Please shorten this.", author="Ayesha", initials="A")
+    doc.save(first)
+    again = Document(first)
+    assert autofix.drop_review_comments(again) == 2                        # the WE12 note and the summary
+    again.save(tmp_path / "again.docx")
+    left = Document(tmp_path / "again.docx")
+    assert [c.author for c in left.comments] == ["Ayesha"]
+    assert [p.text for p in left.paragraphs] == ["Introduction", "Body text of the lesson."]
