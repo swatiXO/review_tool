@@ -181,3 +181,37 @@ def test_lists_describe_the_fixed_copies_not_the_submitted_files(app, tmp_path):
 def test_upload_errors_are_shown_in_red(app):
     r = app.test_client().post("/jobs", data={"package": (io.BytesIO(b"x"), "notes.txt")}, content_type="multipart/form-data")
     assert b'class=\'bad\'' in r.data and b".bad{" in r.data
+
+
+def test_documents_can_be_uploaded_on_their_own_and_are_reviewed(app, tmp_path):
+    import zipfile
+    from docx import Document
+    d = new_doc()
+    add(d, "Plants and roots", bold=True)
+    for s in ("Introduction", "SLOs", "Warm-up", "Concept Building", "Key Takeaways"):
+        add(d, s, bold=True)
+        add(d, "Some text for this part of the lesson.")
+    buf = io.BytesIO()
+    d.save(buf)
+    c = app.test_client()
+    form = {"package": [(io.BytesIO(buf.getvalue()), "Roots lesson 3.docx"), (io.BytesIO(buf.getvalue()), "notes.docx")]}
+    r = c.post("/jobs", data=form, content_type="multipart/form-data")
+    job = r.headers["Location"].rsplit("/", 1)[-1]
+    assert c.get(f"/jobs/{job}/status").get_json()["state"] == "done"
+    z = zipfile.ZipFile(io.BytesIO(c.get(f"/jobs/{job}/files/Marked-up-documents.zip").data))
+    names = z.namelist()
+    assert not any("course-review-" in n for n in names)                  # no temp folder name at the top
+    lp = next(n for n in names if n.endswith(".docx") and "Lesson-Plan" in n)   # recognised by its content and renamed
+    doc = Document(io.BytesIO(z.read(lp)))
+    assert len(doc.comments) > 0                                          # reviewed: comments written into the file
+    assert any("Recognised as lesson plan from its content" in cm.text for cm in doc.comments)
+    notes = z.read(next(n for n in names if n.endswith("REVIEW-NOTES.txt"))).decode()
+    assert "Only the uploaded document(s) were reviewed" in notes and "No Data Bank" not in notes
+
+
+def test_a_mix_of_zip_and_documents_or_other_files_is_refused(app):
+    c = app.test_client()
+    r = c.post("/jobs", data={"package": [(io.BytesIO(b"x"), "a.zip"), (io.BytesIO(b"x"), "b.docx")]}, content_type="multipart/form-data")
+    assert r.status_code == 400
+    r = c.post("/jobs", data={"package": [(io.BytesIO(b"x"), "b.pdf")]}, content_type="multipart/form-data")
+    assert r.status_code == 400

@@ -500,7 +500,10 @@ def read(ctx, doc, info):
     model = ctx.model
     if model is None or not getattr(model, "structure", True):
         return None
+    from .ingest import GENERIC
     kind = doc.doc_type if doc.doc_type in ("lesson_plan", "facilitator_guide") else None
+    if doc.doc_type == GENERIC and doc.ext == "docx":
+        kind = "lesson_plan"          # a document nothing else could place: the model may still see a Lesson Plan in it
     if kind is None or (kind == "lesson_plan" and doc.ext != "docx") or (kind == "facilitator_guide" and doc.ext != "pptx"):
         return None
     from .judge import material_budget
@@ -530,6 +533,16 @@ def read(ctx, doc, info):
         return None
     if kind == "lesson_plan":
         st = reconcile_lesson_plan(ctx, info, hit["reading"])
+        if doc.doc_type == GENERIC:
+            found = [k for k, v in st.sections.items() if v is not None]
+            if len(found) < 3:
+                return None           # not a Lesson Plan: it keeps the general checks
+            doc.doc_type, doc.scope = "lesson_plan", "lesson"
+            doc.chapter = doc.chapter if doc.chapter is not None else 1
+            doc.lesson = doc.lesson if doc.lesson is not None else 1
+            doc.notes = [n for n in doc.notes if not n.startswith(("Recognised as", "converted"))] + \
+                [f"Recognised as lesson plan by the model: it found {len(found)} of the five sections under other names. "
+                 "Lesson and chapter numbers were assumed as 1 where the file does not give them."]
     else:
         st = reconcile_slides(ctx, info, {int(k): v for k, v in hit["reading"]["slides"].items()})
     st.stats = counts

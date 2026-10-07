@@ -27,7 +27,7 @@ path_patterns:
   lesson: '(?i)lesson[-_ ]*(\d+)'
 
 # Document types the Writing & Editing Guidelines apply to (subject-level WE rules).
-formatted_types: [lesson_plan, facilitator_guide, video_storyboard, pop_quiz, data_bank, specification, chapter_exam, worksheet]
+formatted_types: [lesson_plan, facilitator_guide, video_storyboard, pop_quiz, data_bank, specification, chapter_exam, worksheet, document]
 
 # Words that identify the five mandatory Lesson Plan sections (LP3, WE14), per language.
 lesson_plan_sections:

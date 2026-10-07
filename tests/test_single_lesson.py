@@ -51,8 +51,9 @@ def test_loose_lesson_files_without_folders_keep_their_lesson_and_no_chapter_exa
     cli.review(z, str(checklist(tmp_path)), str(out))
     r = json.load(open(out / "review.json", encoding="utf-8"))
     assert [d["lesson"] for d in r["inventory"]["documents"]] == ["2"]
-    ws1 = [f for f in r["findings"] if f["code"] == "WS1"]
-    assert ws1 and all(f["status"] == "needs_review" for f in ws1)
+    # only the uploaded document is reviewed: the rest of the course is not reported missing
+    assert not [f for f in r["findings"] if f["code"] in ("WS1", "CE1", "PQ1", "DB1") and f["status"] in ("fail", "needs_review")]
+    assert any(f["code"] == "NOTE" and "Only the uploaded" in f["message"] for f in r["findings"])
 
 
 def test_the_teams_checklist_is_built_in(tmp_path):

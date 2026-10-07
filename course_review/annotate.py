@@ -380,6 +380,7 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True,
                     if d.ext == "docx" and src == str(staged):
                         autofix.add_footer(src, base, version)
                         fixed_lines.append("Footer added: document name, " + ("version, " if version else "") + "date, page number")
+                    fixed_lines[:0] = [n for n in d.notes if n.startswith(("Recognised as", "converted from"))]
                     if name and version and found_in != "the file name":
                         fixed_lines.append(f"Version v{version} taken from {found_in}")
                     rel = (d.rel.rsplit("/", 1)[0] + "/" if "/" in d.rel else "") + dst.name
@@ -417,6 +418,7 @@ def _notes_text(findings, pkg, rules, renamed=None):
              "comment lists what was changed. What needs a person is highlighted with a comment. " + LEGEND, ""]
     if renamed:
         lines += ["Files renamed to the guideline pattern:"] + [f"- {old}  ->  {new}" for old, new in sorted(renamed.items())] + [""]
+    lines += [f.message + "." for f in findings if getattr(f, "code", "") == "NOTE"]
     lines += ["Results that do not belong to one file:", ""]
     groups = defaultdict(lambda: ([], []))   # (status, message) -> (codes, places)
     for f in findings:
@@ -434,6 +436,6 @@ def _notes_text(findings, pkg, rules, renamed=None):
         head = f"{', '.join(codes)} {LABEL[status]}" if codes else ""
         lines.append(f"- {head + ' ' if head else ''}{'(' + ', '.join(places) + ') ' if places else ''}{': ' if head else ''}{msg}".replace(" : ", ": "))
     if pkg.unclassified:
-        lines += ["", "Files the tool could not place in a lesson or chapter (not reviewed):"]
+        lines += ["", "Files that were not reviewed:"]
         lines += [f"- {u}" for u in pkg.unclassified]
     return "\n".join(lines) + "\n"

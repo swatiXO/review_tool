@@ -242,3 +242,25 @@ def test_the_structure_follows_the_text_into_the_corrected_copy(tmp_path):
     by = {k: new.paras[v].text for k, v in moved.sections.items() if v is not None}
     assert by == {"introduction": "1 Introduction", "warm_up": "2 Warm-up", "concept_building": "3 Concept Building",
                   "key_takeaways": "4 Key Takeaways"}
+
+
+def test_a_document_nothing_could_place_becomes_a_lesson_plan_when_the_model_reads_one(tmp_path):
+    from course_review.ingest import GENERIC
+    info = plan(tmp_path, OFF_TEMPLATE)
+    ctx = make_ctx()
+    ctx.model = ModelConfig(client=Reader(**GOOD_READER))
+    d = ref()
+    d.abs, d.rel, d.doc_type, d.chapter, d.lesson = str(tmp_path / "plan.docx"), "plan.docx", GENERIC, None, None
+    structure.attach(ctx, d, info)
+    assert d.doc_type == "lesson_plan" and (d.chapter, d.lesson) == (1, 1)
+    assert any("Recognised as lesson plan by the model" in n for n in d.notes)
+
+
+def test_a_document_without_lesson_plan_sections_stays_general(tmp_path):
+    from course_review.ingest import GENERIC
+    info = plan(tmp_path, [("Staff memo", True), ("Please submit your timesheets by Friday.", False)])
+    ctx = make_ctx()
+    ctx.model = ModelConfig(client=Reader(sections={}, headings=[]))
+    d = ref()
+    d.abs, d.rel, d.doc_type = str(tmp_path / "plan.docx"), "memo.docx", GENERIC
+    assert structure.attach(ctx, d, info) is None and d.doc_type == GENERIC

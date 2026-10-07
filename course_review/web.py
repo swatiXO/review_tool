@@ -22,6 +22,8 @@ from flask import Flask, Response, abort, jsonify, redirect, render_template_str
 
 from . import cli
 
+DOC_EXTS = (".docx", ".pptx", ".doc", ".ppt")   # documents that can be uploaded on their own, without a zip
+
 JOB_ID = re.compile(r"^[0-9a-f]{12}$")
 DOWNLOADS = {"report.html": "text/html; charset=utf-8", "Course-Review-Checklist-filled.xlsx":
              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "review.json": "application/json",
@@ -96,10 +98,10 @@ details summary{cursor:pointer;color:var(--mut)}
 HOME = """
 <form class="card" method="post" action="{{ url_for('create_job') }}" enctype="multipart/form-data">
   <div class="head"><h2>Review a package</h2>
-  <div class="steps"><span><b>1</b> Upload the zip</span><span>&rarr; <b>2</b> Wait for the review</span><span>&rarr; <b>3</b> Download the results</span></div></div>
+  <div class="steps"><span><b>1</b> Upload a zip or documents</span><span>&rarr; <b>2</b> Wait for the review</span><span>&rarr; <b>3</b> Download the results</span></div></div>
   <div class="drop" id="drop">
-    <input type="file" name="package" accept=".zip" required aria-label="Course package (.zip)">
-    <b>Drop the course package (.zip) here</b>
+    <input type="file" name="package" accept=".zip,.docx,.pptx,.doc,.ppt" multiple required aria-label="Course package (.zip) or documents">
+    <b>Drop the course package (.zip) or one or more documents (.docx, .pptx) here</b>
     <span class="mut">or click to choose it</span>
     <span class="chosen" id="chosen"></span>
   </div>
@@ -132,7 +134,7 @@ HOME = """
 </table></div></div>{% endif %}
 <script>
 const drop=document.getElementById('drop'),inp=drop.querySelector('input'),chosen=document.getElementById('chosen');
-inp.addEventListener('change',()=>{const f=inp.files[0];chosen.textContent=f?f.name+' ('+(f.size/1048576).toFixed(1)+' MB)':'';drop.classList.toggle('has',!!f)});
+inp.addEventListener('change',()=>{const fs=[...inp.files];const mb=fs.reduce((a,f)=>a+f.size,0)/1048576;chosen.textContent=fs.length?(fs.length==1?fs[0].name:fs.length+' files: '+fs.map(f=>f.name).join(', '))+' ('+mb.toFixed(1)+' MB)':'';drop.classList.toggle('has',fs.length>0)});
 ['dragenter','dragover'].forEach(e=>drop.addEventListener(e,()=>drop.classList.add('over')));
 ['dragleave','drop'].forEach(e=>drop.addEventListener(e,()=>drop.classList.remove('over')));
 </script>
@@ -320,7 +322,8 @@ def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", ex
             if opts["book_index"]:
                 from .book import BookIndex
                 book = BookIndex.load(books / opts["book_index"])
-            pkg, res, xlsx, secs = cli.review(str(d / "package.zip"), opts["checklist"], str(d / "out"), model=model, book=book, progress=progress)
+            pkg, res, xlsx, secs = cli.review(str(d / "package.zip"), opts["checklist"], str(d / "out"), model=model, book=book,
+                                              progress=progress, name=opts.get("name"))
             c = Counter(f.status for f in res.findings)
             for name in DOWNLOADS:
                 src = d / "out" / name
@@ -362,15 +365,32 @@ def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", ex
 
     @app.post("/jobs")
     def create_job():
-        pkg = request.files.get("package")
-        if pkg is None or not pkg.filename:
-            return page("Course Review", "<div class='card'><p class='bad'>Choose a zip file to review.</p></div>"), 400
-        if not pkg.filename.lower().endswith(".zip"):
-            return page("Course Review", "<div class='card'><p class='bad'>The package must be a .zip file.</p></div>"), 400
+        files = [f for f in request.files.getlist("package") if f and f.filename]
+        if not files:
+            return page("Course Review", "<div class='card'><p class='bad'>Choose a zip file or documents to review.</p></div>"), 400
+        names = [os.path.basename(f.filename.replace("\\", "/")) for f in files]
+        zips = [n for n in names if n.lower().endswith(".zip")]
+        loose_ok = all(n.lower().endswith(DOC_EXTS) for n in names)
+        if not ((len(files) == 1 and zips) or (not zips and loose_ok)):
+            return page("Course Review", "<div class='card'><p class='bad'>Upload one .zip, or one or more documents "
+                        "(.docx, .pptx, .doc, .ppt). The package must be a .zip file when it holds folders.</p></div>"), 400
         job_id = uuid.uuid4().hex[:12]
         d = jobs / job_id
         d.mkdir()
-        pkg.save(d / "package.zip")
+        pkg = files[0]
+        if zips:
+            pkg.save(d / "package.zip")
+        else:
+            # documents uploaded on their own are reviewed as a package of loose files
+            import zipfile
+            with zipfile.ZipFile(d / "package.zip", "w", zipfile.ZIP_DEFLATED) as z:
+                used = set()
+                for f, n in zip(files, names):
+                    n = re.sub(r"[^\w.\- ()]+", "_", n) or "document.docx"
+                    while n in used:
+                        n = "copy-" + n
+                    used.add(n)
+                    z.writestr(n, f.read())
         up = request.files.get("checklist")
         if up is not None and up.filename:
             if not up.filename.lower().endswith(".xlsx"):
@@ -392,7 +412,9 @@ def create_app(jobs_dir="web_jobs", checklist=None, books_dir="book_indexes", ex
         opts = {"checklist": checklist_path, "model_mode": mode, "model_url": request.form.get("model_url", "").strip(),
                 "model_name": request.form.get("model_name", "").strip(), "book_index": book}
         label = {"off": "", "fallback": "model for unrecognised formats", "checks": "model for formats and content checks"}[mode]
-        _write_meta(d, {"id": job_id, "name": os.path.basename(pkg.filename), "created": time.strftime("%Y-%m-%d %H:%M"),
+        shown = names[0] if len(names) == 1 else f"{names[0]} and {len(names) - 1} more"
+        opts["name"] = os.path.splitext(names[0])[0] if len(names) == 1 else "Uploaded-documents"
+        _write_meta(d, {"id": job_id, "name": shown, "created": time.strftime("%Y-%m-%d %H:%M"),
                         "state": "queued", "stage": "Waiting to start", "options": label})
         pool.submit(run_job, job_id, opts)
         return redirect(url_for("job_page", job_id=job_id))

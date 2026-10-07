@@ -7,6 +7,7 @@
 """
 import argparse
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -43,7 +44,8 @@ def default_checklist():
     return os.environ.get("COURSE_REVIEW_CHECKLIST") or BUILTIN_CHECKLIST
 
 
-def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None, progress=None):
+def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=None, book=None, progress=None, name=None):
+    """name: what to call the package folder when the zip has its files at the top level (default: the zip's name)."""
     t0 = time.time()
     profile = ingest.load_profile(profile_path)
     rules, layout = workbook.load_rules(checklist)
@@ -51,7 +53,8 @@ def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=No
     try:
         say = progress or (lambda *a: None)
         say("Unpacking the zip", 0, 0)
-        dest = ingest.safe_extract(zip_path, work)
+        folder = re.sub(r"[^\w\- ]+", "", Path(name or zip_path).stem).strip() or "Course-Package"
+        dest = ingest.safe_extract(zip_path, work / folder)
         say("Sorting the files", 0, 0)
         pkg = ingest.classify(ingest.find_root(dest), profile)
         res = engine.run(pkg, profile, rules, layout, model=model, book=book, progress=progress)

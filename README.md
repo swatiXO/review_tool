@@ -7,6 +7,15 @@ The only network call it can make is to an Ollama server you point it at (your n
 The workbook is the authority. Rule codes, wording and scope are read from it at start-up, and
 nothing is overridden. The Grade 6 Islamiat zip is only an example of a package.
 
+**Single documents.** The web page also takes one or more Word or PowerPoint files without a zip. Only
+those files are reviewed: nothing is reported missing for the rest of the course. A file whose name
+does not say what it is (e.g. "Unit 1 Cells Lesson 1.docx") is recognised by its content: its title,
+the Lesson Plan section names, question patterns, Pop Quiz and Data Bank labels, storyboard columns; with
+a model connected, the model can also recognise a Lesson Plan written under other section names. The
+first comment in the file says how it was recognised. A file that still cannot be placed gets the
+Writing & Editing checks and fixes. Old Word 97-2003 files (.doc, .ppt) are converted when LibreOffice
+is installed; otherwise the notes ask for the file to be saved as .docx / .pptx.
+
 ## Quick start
 
 The team's Course Review Checklist is built in (`course_review/data/Course-Review-Checklist.xlsx`). Pass `--checklist` (or set `COURSE_REVIEW_CHECKLIST`) only to use a different workbook; replace the built-in file when the checklist is updated.
@@ -15,7 +24,7 @@ The team's Course Review Checklist is built in (`course_review/data/Course-Revie
 ```bash
 pip install -r requirements.txt
 
-# the web page: upload a zip, watch progress, download the results
+# the web page: upload a zip (or just one or more .docx/.pptx files), watch progress, download the results
 python -m course_review.cli serve       # http://127.0.0.1:8080
 
 # or the command line

@@ -106,6 +106,9 @@ def cell_note(findings):
 
 
 DERIVED = {"LP10": LP10_COMPONENTS, "FG8": FG8_COMPONENTS}
+# results about other documents being in the package, left out when single documents are uploaded on their own
+UPLOAD_PRESENCE_CODES = {"PQ1", "PQ2", "PQ3", "PQ4", "PQ5", "DB1", "DB2", "DB3", "DB4", "DB5", "DBS1", "ST1", "ST2",
+                         "CE1", "CE4", "CE5", "WS1", "WS2", "WS3", "WS4", "WS5", "WS6", "LP3"}
 
 
 def derived_finding(code, comp):
@@ -147,7 +150,7 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
     # 1. per-document formatting + structure
     doc_findings = defaultdict(list)    # code -> [Finding]
     if model is not None and getattr(model, "structure", True):
-        readable = [d for d in formatted if (d.doc_type, d.ext) in (("lesson_plan", "docx"), ("facilitator_guide", "pptx"))]
+        readable = [d for d in formatted if (d.doc_type, d.ext) in (("lesson_plan", "docx"), ("facilitator_guide", "pptx"), ("document", "docx"))]
         for n, d in enumerate(readable, 1):
             say("Reading document structure", n, len(readable))
             info = ctx.docx(d) if d.ext == "docx" else ctx.pptx(d)
@@ -242,6 +245,19 @@ def run(pkg, profile, rules, layout, model=None, book=None, progress=None):
                 continue
             F.append(result("WS1", FAIL, "No Chapter Exam (per-chapter) file found for this chapter", chapter=ch))
             missing.append((f"Chapter {ch}", "Chapter Exam (per-chapter)"))
+
+    # Single documents uploaded on their own (no course folders): only they are reviewed. That the rest of the
+    # course (Pop Quiz, Data Bank, Assessment, specifications) is not in the upload is not a finding.
+    if pkg.docs and all("/" not in d.rel for d in pkg.docs):
+        keep = []
+        for f in F:
+            if f.doc is None and f.code in UPLOAD_PRESENCE_CODES and f.status in (FAIL, REVIEW):
+                continue
+            keep.append(f)
+        F[:] = keep
+        missing = []
+        F.append(result("NOTE", NA, "Only the uploaded document(s) were reviewed; checks that need the rest of the course "
+                        "(Pop Quiz, Data Bank, Assessment, Chapter Exam, SLO coverage) were not run"))
 
     # 4. derived LP10 / FG8
     def derive(code, components, doc_type):
