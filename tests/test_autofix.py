@@ -113,7 +113,7 @@ def test_no_version_is_made_up(tmp_path):
     name, d, text = fixed_lesson_plan(tmp_path)
     assert name.endswith("/Lesson-Plan-Lesson-2-Chapter-4.docx")          # renamed, but no invented -v0.1
     assert "v0.1" not in d.sections[0].footer.paragraphs[0].text
-    assert "WE3 FAIL" in text                  # the writer is still asked to add the version
+    assert "[WE3]" in text and "To fix" in text  # the writer is still asked to add the version
     assert "WE4 FAIL" not in text and "WE8 FAIL" not in text
 
 
@@ -122,7 +122,7 @@ def test_version_is_taken_from_the_footer(tmp_path):
     assert name.endswith("/Lesson-Plan-Lesson-2-Chapter-4-v2.1.docx")
     assert "v2.1" in d.sections[0].footer.paragraphs[0].text
     assert "Version v2.1 taken from the footer" in text
-    assert "WE3 CHECK" in text                 # a person still confirms it matches the document's stage
+    assert "Please check" in text and "[WE3]" in text   # a person still confirms it matches the document's stage
 
 
 def test_quran_hadith_and_dua_text_is_never_edited(tmp_path):
@@ -170,7 +170,7 @@ def test_headings_left_unnumbered_keep_their_numbering_comment(tmp_path):
     (tmp_path / "f.docx").write_bytes(z.read(next(n for n in z.namelist() if n.endswith(".docx"))))
     text = "\n".join(c.text for c in Document(str(tmp_path / "f.docx")).comments)
     assert "not numbered" in text
-    assert "WE12 FAIL" in text and "LP4 FAIL" in text
+    assert "[WE12]" in text and "[LP4]" in text
     assert "WE13 FAIL" not in text                       # the Heading styles were applied
 
 

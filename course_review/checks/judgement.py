@@ -51,10 +51,17 @@ def get_slos_text_for(ctx, key):
     return [s.text for s in slos_for(slos, key)] if slos else []
 
 
-def lesson_slo_texts(ctx, key, sections):
+def lesson_slo_texts(ctx, key, sections, info=None):
+    """The lesson's SLOs: from the specifications when they are in the package, otherwise the Lesson Plan's own SLO
+    list (only the SLO statements, not the lines that follow them in the section, such as prior knowledge or a word list)."""
     texts = get_slos_text_for(ctx, key)
     if texts:
         return texts
+    if info is not None:
+        from .lessonplan import slo_items
+        items, _ = slo_items(ctx, info)
+        if items:
+            return [re.sub(r"^\s*(?:[•▪●◦\-–—*]\s*|\(?\d+[.)]\s*)", "", p.text.strip()) for p in items]
     block = sections.get("slos", "")
     lines = [l.strip() for l in block.splitlines()[1:] if l.strip() and not re.search(r"[:：]$", l.strip())]
     return lines
@@ -142,8 +149,9 @@ def lp1(ctx, key, doc, secs, slos):
         return suggestion("LP1", j, **where(key, doc))
     missing = [x for x in range(1, n + 1) if x not in covered]
     j = Judgement(verdict="fail" if missing else "pass", quotes=quotes[:3], usable=True,
-                  reason=(f"Concept Building was read in {len(parts)} parts; " +
-                          ("SLO(s) " + ", ".join(map(str, missing)) + " not covered in any part." if missing else "every SLO is covered in some part.")))
+                  reason=("These SLOs do not seem to be taught in Concept Building: " +
+                          "; ".join(f"'{slos[x - 1][:70]}'" for x in missing) + "." if missing
+                          else "every SLO is taught somewhere in Concept Building."))
     f = suggestion("LP1", j, **where(key, doc))
     if missing:
         f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{x} ({slos[x - 1][:50]})" for x in missing))
@@ -385,7 +393,7 @@ def judgement_findings(ctx):
             info = ctx.docx(lp)
             if info is not None:
                 secs = section_texts(ctx, info)
-                slos = lesson_slo_texts(ctx, key, secs)
+                slos = lesson_slo_texts(ctx, key, secs, info)
         for code, fn in LESSON_PLAN_JUDGES.items():
             if m.wants(code) and lp is not None and secs:
                 f = fn(ctx, key, lp, secs, slos)

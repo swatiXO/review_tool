@@ -267,7 +267,7 @@ def test_long_concept_building_is_read_in_parts_and_an_slo_counts_if_any_part_co
     assert len(split_parts(cb, 3000)) > 1
     f = lp1(ctx, None, None, {"concept_building": cb}, slos)
     assert ctx.model.client.calls > 1
-    assert "Would be fail" in f.message and "3 not covered" in f.message      # leaves: in no part
+    assert "Would be fail" in f.message and "'Name the leaves'" in f.message      # leaves: in no part
     assert any("3 (Name the leaves)" in e for e in f.evidence)
 
 

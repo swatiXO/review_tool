@@ -92,15 +92,17 @@ def slo_blocks(ctx, info: DocxInfo):
     return out
 
 
-def lp5(ctx, doc, info: DocxInfo):
+def slo_items(ctx, info: DocxInfo):
+    """(the Lesson Plan's SLO statements as paragraphs, number of SLO sections) or (None, 0) when there is no
+    SLO section. The model's list when it read the structure; otherwise the lines under the SLO heading, without
+    the lead-in, the 'Knowledge:' labels and what follows the list (notes, instructions, other headings)."""
     from ..structure import of
     st = of(info)
     if st is not None and st.sections.get("slos") is not None:
-        items = [info.paras[i] for i in st.lists.get("slo_items", [])]
-        return _lp5_verdict(items, "")
+        return [info.paras[i] for i in st.lists.get("slo_items", [])], 1
     blocks = slo_blocks(ctx, info)
     if not blocks:
-        return result("LP5", REVIEW, "The SLO section was not found, so the SLO list could not be checked")
+        return None, 0
     sub = [normalize(x).lower().rstrip(":：") for x in ctx.profile["vocab"].get("slo_sublabels", [])]
     stops = [normalize(x).lower() for x in ctx.profile["vocab"].get("slo_block_end_labels", [])]
     leads = [normalize(x).lower() for x in ctx.profile["vocab"].get("slo_lead_ins", [])]
@@ -118,7 +120,14 @@ def lp5(ctx, doc, info: DocxInfo):
             if any(head.startswith(x) or (x in head and ":" in t[:45]) for x in stops):
                 break     # 'Note:', 'طلبہ کے لیے ہدایت:', 'برائے اساتذہ' ... end the SLO list; what follows is not SLOs
             items.append(p)
-    return _lp5_verdict(items, f" in {len(blocks)} SLO sections" if len(blocks) > 1 else "")
+    return items, len(blocks)
+
+
+def lp5(ctx, doc, info: DocxInfo):
+    items, n = slo_items(ctx, info)
+    if items is None:
+        return result("LP5", REVIEW, "The SLO section was not found, so the SLO list could not be checked")
+    return _lp5_verdict(items, f" in {n} SLO sections" if n > 1 else "")
 
 
 def _lp5_verdict(items, where):

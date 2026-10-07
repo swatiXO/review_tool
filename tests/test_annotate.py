@@ -35,8 +35,8 @@ def test_failing_heading_is_red_with_a_comment_naming_the_code(tmp_path):
     assert c["Introduction"] == {WD_COLOR_INDEX.RED}
     assert c["Some body text that is fine."] == {None}
     texts = comment_texts(dst)
-    assert any(t.startswith("WE12 FAIL: heading has no decimal number") for t in texts)
-    assert any("Red = fails" in t for t in texts)          # the legend comment at the top
+    assert any(t.startswith("To fix: Number this heading") and t.endswith("[WE12]") for t in texts)
+    assert any("Red = please fix" in t for t in texts)     # the colour key in the summary at the top
 
 
 def test_model_suggestion_is_turquoise_and_pass_is_green(tmp_path):
@@ -84,7 +84,7 @@ def test_whole_document_problems_go_in_the_top_comment(tmp_path):
     f = result("WE7", FAIL, "Urdu text is not Jamil Noori Nastaliq")
     annotate.annotate_docx(src, dst, [f])
     top = comment_texts(dst)[0]
-    assert "WE7 FAIL: Urdu text is not Jamil Noori Nastaliq" in top
+    assert "To fix: Urdu text is not Jamil Noori Nastaliq. [WE7]" in top
     assert colours(dst)["First paragraph"] == {None}
 
 
@@ -100,7 +100,7 @@ def test_slides_get_a_highlight_and_a_review_box(tmp_path):
     assert annotate.annotate_pptx(src, dst, [f]) == 1
     out = Presentation(dst)
     boxes = {i: sh.text_frame.text for i, sl in enumerate(out.slides, 1) for sh in sl.shapes if sh.name == "Course Review notes"}
-    assert "FG3 CHECK: model suggests PASS" in boxes[1]
+    assert "AI check, looks fine" in boxes[1] and "[FG3]" in boxes[1]
     assert 2 not in boxes
     xml = out.slides[0].shapes[0].text_frame.paragraphs[0].runs[0]._r.xml
     assert "highlight" in xml and "00FFFF" in xml
@@ -117,7 +117,7 @@ def test_review_writes_a_marked_up_zip_with_notes(tmp_path):
     lp = next(n for n in names if n.endswith("Lesson-Plan-Lesson-1-Chapter-1.docx"))
     (tmp_path / "lp.docx").write_bytes(z.read(lp))
     top = comment_texts(tmp_path / "lp.docx")[-1]
-    assert "Fixed by the tool" in top and "A4" in top
+    assert "What we fixed for you" in top and "A4" in top
 
 
 def test_every_turquoise_highlight_has_a_comment_that_says_what_to_do(tmp_path):
@@ -135,9 +135,9 @@ def test_every_turquoise_highlight_has_a_comment_that_says_what_to_do(tmp_path):
     turquoise = [t for t, cs in c.items() if WD_COLOR_INDEX.TURQUOISE in cs]
     assert turquoise == ["Roots hold the plant.", "Stems carry water.", "Leaves make food."]   # a pass: one place only
     texts = comment_texts(dst)
-    assert any("model suggests PASS" in t and "delete this comment" in t for t in texts)
-    assert any("model suggests FAIL" in t and "reword this as a suggestion" in t for t in texts)
-    assert sum(1 for t in texts if t.startswith("LP7")) == 2                                    # each FAIL place commented
+    assert any(t.startswith("AI check, looks fine") and "delete this note" in t for t in texts)
+    assert any(t.startswith("AI check, may need fixing") and "tell the writer" in t for t in texts)
+    assert sum(1 for t in texts if "[LP7]" in t) == 2                                          # each FAIL place commented
 
 
 def test_a_re_uploaded_copy_loses_the_earlier_review_but_keeps_peoples_comments(tmp_path):

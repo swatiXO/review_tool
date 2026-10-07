@@ -23,6 +23,7 @@ from docx.enum.text import WD_COLOR_INDEX
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 
+from . import plain
 from .models import FAIL, PASS, REVIEW
 from .textutil import normalize, to_western_digits
 
@@ -34,29 +35,18 @@ LABEL = {FAIL: "FAIL", REVIEW: "CHECK", PASS: "PASS"}
 CHANGED = "changed"                   # a line the tool corrected in this copy
 WORD_COLOUR[CHANGED] = WD_COLOR_INDEX.PINK
 COLOUR_ORDER = {FAIL: 4, REVIEW: 3, CHANGED: 2, PASS: 1}
-LEGEND = ("Red = fails the checklist. Turquoise = the model's suggestion: each one has a comment saying what to do "
-          "(you confirm or reject it, then delete it). Pink = corrected by the tool: the comment says what it was, why it "
-          "did not fit, and what it is now. Green = passes.")
-ACTION = {
-    "pass": "Your call: if you agree it passes, delete this comment and the highlight. If not, replace it with your own "
-            "comment to the creator saying what is missing.",
-    "fail": "Your call: if you agree, reword this as a suggestion to the creator (Comment Workflow) and fill the cell in the "
-            "checklist workbook. If you disagree, delete this comment and the highlight.",
-    "unclear": "The model could not decide: please judge this item yourself.",
-}
+LEGEND = plain.LEGEND
 
 
 def _model_lines(f, note, first):
     """Comment text for a model suggestion: what it suggests, why, and what the reviewer does."""
     verdict = "fail" if "FAIL" in (note or "") or "Would be fail" in f.message else \
               "pass" if "PASS" in (note or "") or "Would be pass" in f.message else "unclear"
+    body = (note or f.message).replace("[model-assisted] ", "")
+    body = re.sub(r"^(?:model suggests (?:PASS|FAIL)|Would be (?:pass|fail))\s*:\s*", "", body)
     if not first:
-        own = (note or "").replace("model suggests FAIL: ", "").split("; the story")[0]
-        return [f"{_code(f.code)} - model suggests {verdict.upper()}" + (f": {own}" if own and verdict == "fail" else
-                " (one more place it refers to)") + f". Same decision as the first {f.code} comment."]
-    body = (note or f.message).replace("model suggests ", "")
-    head = f"{_code(f.code)} - model suggests {verdict.upper()}, a reviewer decides" if verdict != "unclear" else f"{_code(f.code)} - model could not decide"
-    return [f"{head}: {body.split(': ', 1)[-1] if ': ' in body else body}", ACTION[verdict]]
+        body = body.split("; the story")[0]
+    return plain.ai_lines(f.code, verdict, body, first, _output_name(f.code))
 MIN_MATCH = 6
 
 
@@ -110,8 +100,12 @@ def _locate(m, para_loose, used, allowed=None):
 OUTPUT_NAME = {"CE": "Assessment", "WS": "Chapter Exam"}
 
 
+def _output_name(code):
+    return OUTPUT_NAME.get(re.sub(r"\d+$", "", code or ""))
+
+
 def _code(code):
-    name = OUTPUT_NAME.get(re.sub(r"\d+$", "", code))
+    name = _output_name(code)
     return f"{code} ({name})" if name else code
 
 
@@ -122,7 +116,10 @@ def _unnumbered(loose_text):
 def _line(f, note=""):
     if not f.code:                        # a _Note already holds a finished line
         return f.message
-    return f"{_code(f.code)} {LABEL.get(f.status, f.status.upper())}: {note or f.message}"
+    if (note or "").startswith("model suggests"):
+        return _model_lines(f, note, True)[0]
+    words = {FAIL: plain.fail_line, REVIEW: plain.check_line}.get(f.status, plain.pass_line)
+    return words(f.code, note or f.message, _output_name(f.code))
 
 
 def _worst(statuses):
@@ -185,7 +182,7 @@ def annotate_docx(src, dst, findings, fixed=None, changes=None):
         hits = same[:1] or _locate({"text": c["text"], "exact": True}, loose, used_c)[:1]
         used_c.update(hits)
         for i in hits:
-            per_para[i].append((CHANGED, f"Corrected by the tool. Before: {c['before']}. Why: {c['why']}. Now: {c['now']}."))
+            per_para[i].append((CHANGED, plain.fixed_line(c.get("plain") or "see the summary at the top.")))
 
     for i, items in sorted(per_para.items()):
         runs = _text_runs(paras[i])
@@ -205,29 +202,47 @@ def annotate_docx(src, dst, findings, fixed=None, changes=None):
     first = next((p for p in paras if _text_runs(p)), None)
     if first is not None:
         problems = [f for f in unplaced if f.status in (FAIL, REVIEW)]
-        lines = ["Course Review of this document. " + LEGEND]
+        codes = {f.code for f in problems}
+        problems = [f for f in problems if not (f.code in plain.REPEATS and len(codes) > 1)
+                    and not (f.code == "WE1" and "WE3" in codes)]       # both only ask for the version in the name
+        lines = ["Course Review: how to read this file", LEGEND]
         if fixed:
-            lines.append("Fixed by the tool in this copy:")
+            lines.append("What we fixed for you:")
             lines += [f"- {l}" for l in fixed]
         if problems:
-            lines.append("Whole-document results:")
-            lines += [f"- {_line(f)}" for f in problems]
+            lines.append("Still to do in the whole file:")
+            lines += [f"- {_whole_line(f)}" for f in problems]
         marked = sum(1 for v in per_para.values() if any(s != CHANGED for s, _ in v))
         pink = sum(1 for v in per_para.values() if v and all(s == CHANGED for s, _ in v))
-        lines.append(f"{marked} paragraph(s) are highlighted in the text below for a person to check."
-                     if marked else "Nothing in the text itself needs a person's attention.")
+        lines.append(f"In the text: {marked} place(s) need you (red or turquoise)." if marked else
+                     "In the text: nothing else needs you.")
         if pink:
-            lines.append(f"{pink} more line(s) are pink: corrected by the tool, each with a comment. Delete those comments once you have looked.")
+            lines.append(f"{pink} line(s) are pink: we fixed them. Delete those notes once you have looked.")
         _comment(doc, _text_runs(first)[:1], lines)
     doc.save(dst)
     return sum(1 for v in per_para.values() if v)
+
+
+def _whole_line(f):
+    """A result about the whole document, as a to-do line."""
+    if not f.code:
+        return f.message
+    if f.status == FAIL:
+        return plain.todo_line(f.code, f.message, _output_name(f.code))
+    if f.method == "model":
+        return plain.ai_lines(f.code, "fail" if "fail" in f.message.lower()[:40] else "pass" if "pass" in f.message.lower()[:40]
+                              else "unclear", re.sub(r"^\[model-assisted\] (?:Would be (?:pass|fail): )?", "", f.message), True,
+                              _output_name(f.code))[0]
+    if f.code in plain.TODO_WORDS:
+        return "Please check: " + plain.TODO_WORDS[f.code](f.message) + plain.tag(f.code, _output_name(f.code))
+    return plain.check_line(f.code, f.message, _output_name(f.code))
 
 
 class _Note:
     """A message that could not be anchored to its paragraph, shown in the top comment."""
 
     def __init__(self, line):
-        self.status = FAIL if " FAIL:" in line else REVIEW if " CHECK:" in line else PASS
+        self.status = FAIL if line.startswith("To fix") else REVIEW if line.startswith(("Please check", "AI check")) else PASS
         self.code, self.message, self.marks = "", line, []
 
 
@@ -292,8 +307,8 @@ def annotate_pptx(src, dst, findings, fixed=None):
 
     if slides:
         problems = [f for f in unplaced if f.status in (FAIL, REVIEW)]
-        top = [(FAIL, "Course Review. " + LEGEND)] + [(PASS, "Fixed by the tool: " + l) for l in (fixed or [])] + \
-              [(f.status, _line(f)) for f in problems]
+        top = [(FAIL, "Course Review. " + LEGEND)] + [(PASS, plain.fixed_line(l)) for l in (fixed or [])] + \
+              [(f.status, _whole_line(f)) for f in problems]
         notes[1] = top + notes.get(1, [])
     for n, items in notes.items():
         lines = list(dict.fromkeys(l for _, l in items))
@@ -376,11 +391,11 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True,
                         dst.unlink(missing_ok=True)
                         dst = dst.with_name(name)
                         stats["renamed"][d.rel] = name
-                        fixed_lines.append(f"File renamed to {name} (pattern [Type]-[Identifier]-[Chapter]-v[Version])")
+                        fixed_lines.append(f"File renamed to {name} (the team's naming pattern)")
                     if d.ext == "docx" and src == str(staged):
                         autofix.add_footer(src, base, version)
                         fixed_lines.append("Footer added: document name, " + ("version, " if version else "") + "date, page number")
-                    fixed_lines[:0] = [n for n in d.notes if n.startswith(("Recognised as", "converted from"))]
+                    fixed_lines[:0] = [plain.source_note(n) for n in d.notes if n.startswith(("Recognised as", "converted from"))]
                     if name and version and found_in != "the file name":
                         fixed_lines.append(f"Version v{version} taken from {found_in}")
                     rel = (d.rel.rsplit("/", 1)[0] + "/" if "/" in d.rel else "") + dst.name
@@ -413,13 +428,13 @@ def annotate_package(pkg, findings, out_zip, rules=None, profile=None, fix=True,
 
 def _notes_text(findings, pkg, rules, renamed=None):
     lines = ["Course Review notes", "",
-             "Formatting rules with one right answer (page setup, fonts, sizes, digits, heading numbers and styles,",
-             "table captions, bullets, colour, footers, file names) have been fixed in these copies; each file's first",
-             "comment lists what was changed. What needs a person is highlighted with a comment. " + LEGEND, ""]
+             "Open each Word file: the notes (comments) in it say what we fixed and what is left for you.",
+             "The first note at the top of each file is a summary.",
+             LEGEND, ""]
     if renamed:
-        lines += ["Files renamed to the guideline pattern:"] + [f"- {old}  ->  {new}" for old, new in sorted(renamed.items())] + [""]
+        lines += ["Files renamed to the team's naming pattern:"] + [f"- {old}  ->  {new}" for old, new in sorted(renamed.items())] + [""]
     lines += [f.message + "." for f in findings if getattr(f, "code", "") == "NOTE"]
-    lines += ["Results that do not belong to one file:", ""]
+    lines += ["", "Other results (not about one file):", ""]
     groups = defaultdict(lambda: ([], []))   # (status, message) -> (codes, places)
     for f in findings:
         if f.status not in (FAIL, REVIEW):
@@ -433,8 +448,9 @@ def _notes_text(findings, pkg, rules, renamed=None):
     if not groups:
         lines.append("None.")
     for (status, msg), (codes, places) in groups.items():
-        head = f"{', '.join(codes)} {LABEL[status]}" if codes else ""
-        lines.append(f"- {head + ' ' if head else ''}{'(' + ', '.join(places) + ') ' if places else ''}{': ' if head else ''}{msg}".replace(" : ", ": "))
+        lead = "To fix" if status == FAIL else "Please check"
+        lines.append(f"- {lead}: {msg.replace('[model-assisted] ', '')}" + (f" ({', '.join(places)})" if places else "") +
+                     (f" [{', '.join(codes)}]" if codes else ""))
     if pkg.unclassified:
         lines += ["", "Files that were not reviewed:"]
         lines += [f"- {u}" for u in pkg.unclassified]

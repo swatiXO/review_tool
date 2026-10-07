@@ -222,7 +222,7 @@ def test_a_heading_with_its_text_run_on_is_split_and_explained(tmp_path):
     out = tmp_path / "marked.docx"
     annotate.annotate_docx(str(fixed), str(out), [], lines, extra["changes"])
     notes = [c.text for c in docx.Document(str(out)).comments]
-    assert any("Corrected by the tool. Before:" in n and "Why: a heading stands on its own line" in n for n in notes)
+    assert any(n.startswith("Fixed for you:") and "were on one line" in n for n in notes)
     marked = docx.Document(str(out))
     pink = [p.text for p in marked.paragraphs if any(r.font.highlight_color == 5 for r in p.runs if r.text.strip())]
     assert "2 Warm-up" in pink and "1 Introduction" in pink

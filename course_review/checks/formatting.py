@@ -418,6 +418,9 @@ def heading_like(ctx, p):
         return False                  # 'Model answer: ...' inside a question
     if OPTION_LIST.search(t):
         return False                  # 'Leaves / Roots / Branches' lists a question's answer options
+    from .lessonplan import is_bullet_text
+    if is_bullet_text(t):
+        return False                  # a line that starts with a bullet is a list item, not a heading
     if p.heading_level:
         return not misstyled_body(p, ctx)
     if len(t) > 90 or p.list_kind:

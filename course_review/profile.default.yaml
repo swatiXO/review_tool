@@ -34,7 +34,7 @@ lesson_plan_sections:
   - key: introduction
     labels: ["Introduction", "تعارف"]
   - key: slos
-    labels: ["SLOs", "Student Learning Outcomes", "Learning Outcomes", "حاصلات تعلیم"]
+    labels: ["SLOs", "Student Learning Outcomes", "Learning Outcomes", "Student Learning Objectives", "Learning Objectives", "حاصلات تعلیم"]
   - key: warm_up
     labels: ["Warm-up", "Warm up", "Warmup", "تحریکی سرگرمی"]
   - key: concept_building

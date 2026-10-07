@@ -204,7 +204,7 @@ def test_documents_can_be_uploaded_on_their_own_and_are_reviewed(app, tmp_path):
     lp = next(n for n in names if n.endswith(".docx") and "Lesson-Plan" in n)   # recognised by its content and renamed
     doc = Document(io.BytesIO(z.read(lp)))
     assert len(doc.comments) > 0                                          # reviewed: comments written into the file
-    assert any("Recognised as lesson plan from its content" in cm.text for cm in doc.comments)
+    assert any("Treated as a Lesson Plan, worked out from what is in the file" in cm.text for cm in doc.comments)
     notes = z.read(next(n for n in names if n.endswith("REVIEW-NOTES.txt"))).decode()
     assert "Only the uploaded document(s) were reviewed" in notes and "No Data Bank" not in notes
 

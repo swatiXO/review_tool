@@ -319,9 +319,6 @@ def drop_review_comments(d):
     return len(ids)
 
 
-BULLET_WHY = "numbering is only for the major headings; lists inside a section use bullets (Writing & Editing Guidelines)"
-
-
 def fix_docx(src, dst, ctx, doc, info):
     """Write a fixed copy of one .docx; returns (lines for the summary comment, what was done, e.g. ticked)."""
     from .checks.formatting import appendix_heading, doc_headings, grade_sizes, leading_number, misstyled_body
@@ -334,7 +331,7 @@ def fix_docx(src, dst, ctx, doc, info):
     lines, hr = [], ctx.profile.get("house_rules", {})
     old_notes = drop_review_comments(d)
     if old_notes:
-        lines.append(f"{old_notes} comment(s) from an earlier Course Review of this file removed; this review replaces them")
+        lines.append(f"Removed {old_notes} old note(s) from an earlier review of this file (your own comments are kept)")
     urdu_font = (hr.get("urdu_fonts") or ["Noto Nastaliq Urdu"])[0]
     eng_font = (hr.get("english_fonts") or ["Poppins"])[0]
     grade, sz, _ = grade_sizes(ctx)
@@ -345,10 +342,10 @@ def fix_docx(src, dst, ctx, doc, info):
         s.orientation = WD_ORIENT.PORTRAIT
         s.page_width, s.page_height = Mm(210), Mm(297)
         s.top_margin = s.bottom_margin = s.left_margin = s.right_margin = Inches(1)
-    lines.append("Page set to A4 portrait with 1-inch margins")
+    lines.append("Page size set to A4 with 1-inch margins")
 
     # changes to particular lines, each highlighted in the copy with what it was, why, and what it is now
-    changes = []                          # (element, before, why, now or None = the line as it now reads)
+    changes = []                          # (element, what was done in plain words[, True when a person should check it])
 
     # paragraph roles
     first = next((p for p in info.paras if p.text.strip() and not p.in_table), None)
@@ -463,15 +460,14 @@ def fix_docx(src, dst, ctx, doc, info):
         # paragraph shading
         _drop(ppr, "w:shd")
     if digits:
-        lines.append(f"{digits} Urdu digits changed to Western (1, 2, 3)")
+        lines.append(f"Urdu numbers changed to 1, 2, 3 ({digits} places)")
     if quoted:
-        lines.append("Quran, hadith and dua text (fully vowelled Arabic) was left exactly as written")
+        lines.append("Quran, hadith and dua text was not touched")
     if flipped:
-        lines.append(f"Text direction corrected on {flipped} paragraph(s) (right-to-left for Urdu, left-to-right for English)")
-    lines.append(f"Line spacing 1.15 and 8 pt after every paragraph; fonts {urdu_font} / {eng_font}; Grade {grade} sizes "
-                 f"(title {sz['title']}, headings {sz['section_heading']}, body {sz['body']}, tables {sz['table_body']})")
+        lines.append(f"Text direction fixed in {flipped} paragraph(s) (Urdu right-to-left, English left-to-right)")
+    lines.append(f"Fonts ({urdu_font} for Urdu, {eng_font} for English), text sizes for Grade {grade} and line spacing set as the guidelines ask")
     if recoloured:
-        lines.append(f"Colour removed from {recoloured} text run(s)")
+        lines.append(f"Coloured text made black ({recoloured} places)")
 
     # table cell shading
     shaded = 0
@@ -494,11 +490,9 @@ def fix_docx(src, dst, ctx, doc, info):
                 _drop(ppr, "w:pStyle")
                 _drop(ppr, "w:outlineLvl")
                 restyled += 1
-                changes.append((els[p.idx], f"running text set in the '{p.style}' style",
-                                "Heading styles are only for headings; text in a Heading style fills the navigation pane and the "
-                                "Table of Contents (Writing & Editing Guidelines)", "the Normal style, as body text"))
+                changes.append((els[p.idx], "This is normal text but was styled as a heading, so it is now normal text."))
     if restyled:
-        lines.append(f"{restyled} paragraph(s) of running text moved from a Heading style to Normal")
+        lines.append(f"{restyled} paragraph(s) of normal text that were styled as headings are now normal text")
 
     # headings: built-in Heading styles and decimal numbers
     if heads:
@@ -508,9 +502,8 @@ def fix_docx(src, dst, ctx, doc, info):
             cut = run_in_split(ctx, p.text) if not is_arabic_scripture(p.text) else None
             if cut is not None:
                 body_p = _split_paragraph(el, len(p.text) - len(p.text.lstrip()) + cut)
-                changes.append((body_p, f"this text ran on after the heading in the same paragraph ('{before_text[:50]}…')",
-                                "a heading stands on its own line and the text under it is body text (Writing & Editing Guidelines)",
-                                "its own paragraph under the heading, word for word"))
+                changes.append((body_p, "The heading and this text were on one line. The text now starts on its own line under "
+                                        "the heading. No words were changed."))
             st = _ensure_heading_style(d, levels[p.idx])
             ppr = el.find(qn("w:pPr"))
             _set(ppr, "w:pStyle", {"w:val": st.style_id})
@@ -530,14 +523,12 @@ def fix_docx(src, dst, ctx, doc, info):
                 first_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
             numbered_now = number_heads and p.idx in numbers and not own_number(ctx, p.text)
             if not p.heading_level or numbered_now and leading_number(before_text) != tuple(int(x) for x in numbers[p.idx].split(".")):
-                what = [] if p.heading_level else [f"the '{before_style}' style"]
                 if numbered_now:
-                    what.append("no decimal number" if leading_number(before_text) is None else "a different number")
-                changes.append((el, f"'{before_text[:60]}' with " + " and ".join(what),
-                                "headings use built-in Heading styles" + (" and decimal numbers 1, 1.1, 1.1.1" if numbered_now else "")
-                                + " (Writing & Editing Guidelines)", f"Heading {levels[p.idx]}" + (" with its number" if numbered_now else "")))
-        lines.append(f"{len(heads)} heading(s) given Heading styles" + (" and decimal numbers (1, 1.1)" if number_heads else
-                     "; not numbered, because the document does not follow the five Lesson Plan sections (see the comments)"))
+                    changes.append((el, f"Heading numbered ({numbers[p.idx]}) and styled as a heading, as the guidelines ask."))
+                else:
+                    changes.append((el, "Styled as a heading, as the guidelines ask."))
+        lines.append(f"{len(heads)} heading(s) styled as headings" + (" and numbered (1, 1.1, ...)" if number_heads else
+                     "; not numbered, because the file does not follow the five Lesson Plan sections (see the notes)"))
 
     # numbered list items -> bullets (numbering is only for the major headings)
     bulleted = 0
@@ -554,7 +545,7 @@ def fix_docx(src, dst, ctx, doc, info):
             if t is not None:
                 t.text = "• " + t.text.lstrip()
             bulleted += 1
-            changes.append((el, f"item {p.num_label or ''} in a numbered list".replace("  ", " "), BULLET_WHY, "a bullet"))
+            changes.append((el, "Changed from a number to a bullet. Only the main headings are numbered."))
     # SLO items written as plain paragraphs -> bullets (LP5)
     if doc.doc_type == "lesson_plan":
         from .checks.lessonplan import lp5
@@ -566,8 +557,7 @@ def fix_docx(src, dst, ctx, doc, info):
                     typed = re.match(r"^\s*\(?[\d٠-٩۰-۹]+[.)]\s*", t.text)
                     t.text = "• " + (t.text[typed.end():] if typed else t.text.lstrip())   # a typed '1.' is the list number, not the text
                     bulleted += 1
-                    changes.append((els[p.idx], f"SLO '{p.text.strip()[:50]}' " + ("numbered by hand" if typed else "written as a plain paragraph"),
-                                    "SLOs are listed as bullets (Lesson Plan Guidelines)", "a bullet"))
+                    changes.append((els[p.idx], "SLOs are written as bullets, so this is now a bullet."))
     # Key Takeaways written as plain paragraphs -> bullets (LPG2)
     if doc.doc_type == "lesson_plan":
         from .checks.guidelines import _is_bullet, takeaway_paras
@@ -583,10 +573,9 @@ def fix_docx(src, dst, ctx, doc, info):
                 typed = re.match(r"^\s*\(?[\d٠-٩۰-۹]+[.)]\s*", t.text)
                 t.text = "• " + (t.text[typed.end():] if typed else t.text.lstrip())
                 bulleted += 1
-                changes.append((els[p.idx], f"Key Takeaway '{p.text.strip()[:50]}' " + ("numbered by hand" if typed else "written as a plain paragraph"),
-                                "Key Takeaways recap the lesson in bullets (Lesson Plan Guidelines)", "a bullet"))
+                changes.append((els[p.idx], "Key Takeaways are written as bullets, so this is now a bullet."))
     if bulleted:
-        lines.append(f"{bulleted} numbered or plain list item(s) turned into bullets")
+        lines.append(f"{bulleted} list item(s) changed to bullets")
 
     # check marks on correct answers -> yellow highlight
     ticked = 0
@@ -604,10 +593,9 @@ def fix_docx(src, dst, ctx, doc, info):
                     if _run_text(r).strip():
                         _set(_rpr(r), "w:highlight", {"w:val": "yellow"})
                 ticked += 1
-                changes.append((el, "the correct answer was marked with a check mark",
-                                "the template marks the correct answer with a yellow highlight", "highlighted yellow, check mark removed"))
+                changes.append((el, "The correct answer is now highlighted yellow instead of marked with a tick."))
         if ticked:
-            lines.append(f"{ticked} correct answer(s) marked with a check mark now highlighted yellow instead")
+            lines.append(f"{ticked} correct answer(s) marked with a tick are now highlighted yellow instead")
 
     # table captions above tables
     captions = 0
@@ -629,10 +617,9 @@ def fix_docx(src, dst, ctx, doc, info):
         cap = _new_para(f"{word} {n}: {head[:50]}".rstrip(": "), info.language, ctx, sz["caption"], italic=True)
         tbl.addprevious(cap)
         captions += 1
-        changes.append((cap, "the table had no caption", "every table has a numbered caption directly above it (Writing & Editing "
-                        "Guidelines); the title is taken from the heading above or the first cell, so check it", None))
+        changes.append((cap, "Added a title for the table below. Please check the wording fits the table.", True))
     if captions:
-        lines.append(f"{captions} numbered table caption(s) added above the tables (titles taken from the heading above or the table's first cell; check them)")
+        lines.append(f"{captions} table title(s) added above the tables (please check the wording)")
 
     # Table of Contents for a Lesson Plan longer than two pages
     if doc.doc_type == "lesson_plan" and heads and not info.has_toc:
@@ -664,14 +651,13 @@ def fix_docx(src, dst, ctx, doc, info):
             for x in (r1, r2, r3, r4, r5):
                 toc.append(x)
             els[first.idx].addnext(toc)
-            changes.append((toc, "no Table of Contents", "a Lesson Plan longer than two pages starts with one (Writing & Editing "
-                            "Guidelines)", "a Table of Contents; Word fills it in when the file is opened (choose Yes when asked to update fields)"))
+            changes.append((toc, "Added a table of contents. When Word asks to update fields, click Yes to fill it in."))
             settings = d.settings.element
             _set(settings, "w:updateFields", {"w:val": "true"})
-            lines.append("Table of Contents inserted after the title (Word fills it in when the file is opened)")
+            lines.append("Table of contents added after the title (click Yes when Word asks to update fields)")
     d.save(dst)
-    done = [{"text": "".join(t.text or "" for t in el.iter(qn("w:t"))).strip(), "before": before, "why": why,
-             "now": now or "".join(t.text or "" for t in el.iter(qn("w:t"))).strip()} for el, before, why, now in changes]
+    done = [{"text": "".join(t.text or "" for t in c[0].iter(qn("w:t"))).strip(), "plain": c[1], "check": len(c) > 2 and c[2]}
+            for c in changes]
     return lines, {"ticked": ticked, "toc": any("Table of Contents" in l for l in lines), "numbered": number_heads,
                    "changes": [c for c in done if c["text"]]}
 
@@ -852,9 +838,9 @@ def fix_pptx(src, dst, ctx, footer=None):
     prs.save(dst)
     lines = [f"Line spacing 1.5 on all {paras} slide paragraph(s); fonts {urdu_font} / {eng_font}"]
     if footer:
-        lines.append("Footer added to every slide: document name, version, date, slide number")
+        lines.append("Footer added to every slide: name, version, date, slide number")
     if digits:
-        lines.append(f"{digits} Urdu digits changed to Western (1, 2, 3)")
+        lines.append(f"Urdu numbers changed to 1, 2, 3 ({digits} places)")
     if recoloured:
-        lines.append(f"Colour removed from {recoloured} text run(s) or table cell(s)")
+        lines.append(f"Coloured text made black ({recoloured} places)")
     return lines

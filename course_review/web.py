@@ -173,10 +173,10 @@ JOB = """
       <span>Every result with its evidence, in a new tab</span></a>
     <a href="{{ url_for('download', job_id=job.id, name='review.json') }}"><b>JSON</b><span>All findings, for other tools</span></a>
   </div>
-  <div class="legend"><span><i class="sw" style="background:#ff0000"></i>Red: fails the checklist</span>
-    <span><i class="sw" style="background:#00e5e5"></i>Turquoise: model suggestion, a reviewer decides</span>
-    <span><i class="sw" style="background:#ff00ff"></i>Pink: corrected by the tool, the comment says what it was and why</span>
-    <span><i class="sw" style="background:#00e000"></i>Green: passes</span></div>
+  <div class="legend"><span><i class="sw" style="background:#ff0000"></i>Red: please fix</span>
+    <span><i class="sw" style="background:#00e5e5"></i>Turquoise: AI check, please decide</span>
+    <span><i class="sw" style="background:#ff00ff"></i>Pink: fixed for you, nothing to do</span>
+    <span><i class="sw" style="background:#00e000"></i>Green: OK</span></div>
   <p class="mut small">Formatting with one right answer (page setup, fonts, sizes, digits, heading numbers, captions, bullets, colour,
   footers, file names) is fixed in the copies; the first comment in each file lists the changes. A blank cell in the workbook means the tool did not decide it.</p>
 </div>
