@@ -264,3 +264,25 @@ def test_a_document_without_lesson_plan_sections_stays_general(tmp_path):
     d = ref()
     d.abs, d.rel, d.doc_type = str(tmp_path / "plan.docx"), "memo.docx", GENERIC
     assert structure.attach(ctx, d, info) is None and d.doc_type == GENERIC
+
+
+def test_the_coverage_check_gets_the_models_slo_list_not_every_line_of_the_section(tmp_path):
+    from course_review.checks.judgement import lesson_slo_texts, section_texts
+    lines = [("Lesson", True), ("Introduction", True), ("Sara finds roots in the garden.", False),
+             ("Student Learning Objectives", True), ("• Name the parts of a root", False), ("• Explain how roots take in water", False),
+             ("Words to Recall", True), ("Organ: a body part with a job", False), ("Warm-up", True), ("What holds a tree up?", False)]
+    reader = Reader(sections={"introduction": "Introduction", "slos": "Student Learning Objectives", "warm_up": "Warm-up"},
+                    headings=["Introduction", "Student Learning Objectives", "Words to Recall", "Warm-up"],
+                    slo=["• Name the parts of a root", "• Explain how roots take in water"])
+    ctx, info = read(tmp_path, lines, reader)
+    slos = lesson_slo_texts(ctx, None, section_texts(ctx, info), info)
+    assert slos == ["Name the parts of a root", "Explain how roots take in water"]    # not 'Words to Recall' or 'Organ: ...'
+
+
+def test_slide_checks_find_slides_by_the_models_reading(tmp_path):
+    from course_review.checks.judgement import slides_for
+    from test_slides_citations import deck
+    info = deck(tmp_path, [("Welcome", ["Grade 6"], ""), ("Let's think", ["why?"], ""), ("Roots", ["parts"], "")])
+    ctx = make_ctx()
+    info.structure = structure.reconcile_slides(ctx, info, {1: "cover", 2: "warm_up", 3: "concept_building"})
+    assert [s.index for s in slides_for(ctx, info, "warm_up")] == [2]          # no 'Warm-up' in its title

@@ -323,6 +323,17 @@ def _slide_text(slides):
     return "\n\n".join(f"[Slide {s.index}: {s.title}]\n{s.body}" + (f"\n(notes) {s.notes}" if s.notes else "") for s in slides)
 
 
+def slides_for(ctx, info, role):
+    """The slides for one part of the lesson: the model's reading of the deck when it read it (structure.py),
+    the slide titles' label words only when it did not."""
+    from ..structure import of
+    st = of(info)
+    if st is not None and st.slide_roles:
+        return [s for s in info.slides_text if st.slide_roles.get(s.index) == role]
+    labels = section_labels(ctx, role) if role in {x["key"] for x in ctx.profile["lesson_plan_sections"]} else []
+    return _slide_by(info, labels) if labels else []
+
+
 def section_labels(ctx, key):
     return next(s["labels"] for s in ctx.profile["lesson_plan_sections"] if s["key"] == key)
 
@@ -331,7 +342,7 @@ def fg1(ctx, key, g, slos):
     info = ctx.pptx(g)
     if info is None or len(info.slides_text) < 2:
         return None
-    slides = _slide_by(info, section_labels(ctx, "slos")) or info.slides_text[:3]
+    slides = slides_for(ctx, info, "slos") or info.slides_text[:3]
     j = judge(ctx.model, "FG1", ctx.rules["FG1"].text if "FG1" in ctx.rules else "SLOs are stated aloud in plain language at Session Overview",
               [Material("SLOs (numbered)", numbered(slos)), Material("Slides", _slide_text(slides))],
               "Do these slides have the facilitator state the SLOs aloud, in plain language, at the Session Overview?")
@@ -340,7 +351,7 @@ def fg1(ctx, key, g, slos):
 
 def fg3(ctx, key, g, slos):
     info = ctx.pptx(g)
-    slides = _slide_by(info, section_labels(ctx, "warm_up")) if info else []
+    slides = slides_for(ctx, info, "warm_up") if info else []
     if not slides:
         return None
     j = judge(ctx.model, "FG3", ctx.rules["FG3"].text if "FG3" in ctx.rules else "The Warm-up slide includes a debrief step",
@@ -350,10 +361,10 @@ def fg3(ctx, key, g, slos):
 
 def fg6(ctx, key, g, slos):
     info = ctx.pptx(g)
-    slides = _slide_by(info, section_labels(ctx, "key_takeaways")) if info else []
+    slides = slides_for(ctx, info, "key_takeaways") if info else []
     if not slides:
         return None
-    tail = [s for s in info.slides_text[-2:] if s not in slides]
+    tail = [s for s in (slides_for(ctx, info, "close") or info.slides_text[-2:]) if s not in slides]
     j = judge(ctx.model, "FG6", ctx.rules["FG6"].text if "FG6" in ctx.rules else "Key Takeaways ties back to the SLOs; the Close includes a check-in question",
               [Material("SLOs (numbered)", numbered(slos)), Material("Key Takeaways and closing slides", _slide_text(slides + tail))],
               "Does the Key Takeaways slide tie back to the SLOs, and does the Close include a check-in question for the students?")
