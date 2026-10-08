@@ -18,12 +18,11 @@ def _lesson_plan_paras(ctx, doc):
     info = ctx.docx(lp)
     if info is None:
         return None
-    # the SLOs are meant to be restated on the slides, so their paragraphs are not counted as copying
-    from .lessonplan import find_sections
-    found = find_sections(ctx, info)
-    start = found.get("slos")
-    later = [v for v in found.values() if v is not None and start is not None and v > start]
-    skip = range(start, min(later)) if start is not None and later else range(0)
+    # the SLOs are meant to be restated on the slides, so they are not counted as copying (only the SLO statements:
+    # other text in that section, such as prior knowledge, still is)
+    from .lessonplan import slo_items
+    items, _ = slo_items(ctx, info)
+    skip = {p.idx for p in items or []}
     return [normalize(p.text) for p in info.paras if len(p.text.strip()) >= COPY_MIN_CHARS and p.idx not in skip]
 
 

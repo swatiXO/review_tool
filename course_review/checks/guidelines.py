@@ -278,11 +278,14 @@ def fg1_verbatim(ctx, doc, info):
     lpi = ctx.docx(lp) if lp else None
     if lpi is None:
         return None
-    r = lp_ranges(ctx, lpi).get("slos")
-    if not r:
+    from .judgement import slides_for
+    from .lessonplan import slo_items
+    items, _ = slo_items(ctx, lpi)               # the lesson's SLO statements (the model's list when it read the plan)
+    if not items:
         return None
-    slo_lines = [normalize(p.text).strip(" •-–—*") for p in _paras(lpi, r) if len(p.text.strip()) >= 25]
-    slide = next((s for s in info.slides_text if any(l in normalize(s.title).lower() for l in SLO_LABELS)), None)
+    slo_lines = [normalize(p.text).strip(" •-–—*") for p in items if len(p.text.strip()) >= 25]
+    overview = slides_for(ctx, info, "slos")     # the Session Overview slide(s) (the model's reading of the deck)
+    slide = overview[0] if overview else next((s for s in info.slides_text if any(l in normalize(s.title).lower() for l in SLO_LABELS)), None)
     if slide is None or not slo_lines:
         return None
     same = []
