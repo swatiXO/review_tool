@@ -106,7 +106,13 @@ with text, so every check and every correction uses the document's own words. Co
 reading (a section cannot start on the title, a list item, a "Note:" line or a "Duration: 40 min"
 line; a heading cannot be a long sentence, an answer-option line or a verse) and drops what fails.
 The structure rules (LP3, LP4, LP5, LPG1, LPG2, WE12, WE13, FG4, FG7) are then decided on that
-reading. The label-word parser is used only when no model is connected, and to fill in a section
+reading, and the model-assisted checks (LP1, FG1, FG3, FG6 ...) are given the model's SLO list and slides.
+The same applies to the other documents: the model reads where each Pop Quiz lesson and each question
+starts (Pop Quiz, Assessment, Chapter Exam), which Data Bank field is which (one table per item, or one
+table with a header row), and which chapter each specification table is for and which column holds the
+lesson number, lesson name and SLO. It answers with positions only; code reads the exact text. A result
+built on the model's reading of the questions says so in its evidence, with the count the numbering rules
+gave when it differs. The label-word parser is used only when no model is connected, and to fill in a section
 the model did not see whose label opens a line. Takes about 10-30 seconds per document; cached.
 
 For everything else the rule is: **the model proposes, code verifies, and a model answer is never a Pass

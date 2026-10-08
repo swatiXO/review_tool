@@ -124,20 +124,12 @@ def test_without_a_model_an_unknown_format_is_needs_review(tmp_path):
     assert res["CE1"].status == REVIEW and "not be supported" in res["CE1"].message
 
 
-def test_suggest_mode_never_writes_a_pass_or_fail(tmp_path):
-    res = exam(ctx_with(cfg(RomanModel(), "suggest")), roman_doc(tmp_path))
-    f = res["CE1"]
-    assert f.status == REVIEW and f.method == "model" and "[model-assisted]" in f.message and "Would be pass" in f.message
-    short = exam(ctx_with(cfg(RomanModel(), "suggest")), roman_doc(tmp_path, lines=ROMAN_LINES[:3]))
-    assert short["CE1"].status == REVIEW and "Would be fail" in short["CE1"].message
-
-
-def test_decide_mode_writes_fails_but_a_pass_stays_partial(tmp_path):
-    ctx = ctx_with(cfg(RomanModel(), "decide"))
-    ok = exam(ctx, roman_doc(tmp_path))["CE1"]
-    assert ok.status == PASS and ok.partial and ok.method == "model"
-    bad = exam(ctx, roman_doc(tmp_path, lines=ROMAN_LINES[:3]))["CE1"]
-    assert bad.status == FAIL and "[model-assisted]" in bad.message
+def test_the_models_reading_of_the_questions_decides_and_says_so(tmp_path):
+    # model first: the questions the model read (verified against the document) are counted like any reading
+    f = exam(ctx_with(cfg(RomanModel(), "suggest")), roman_doc(tmp_path))["CE1"]
+    assert f.status == PASS and any("read by the model" in e for e in f.evidence)
+    short = exam(ctx_with(cfg(RomanModel(), "suggest")), roman_doc(tmp_path, lines=ROMAN_LINES[:3]))["CE1"]
+    assert short.status == FAIL
 
 
 def test_when_the_model_cannot_help_the_reason_is_in_the_evidence(tmp_path):
@@ -146,13 +138,13 @@ def test_when_the_model_cannot_help_the_reason_is_in_the_evidence(tmp_path):
     assert f.status == REVIEW and any("Model fallback did not help" in e for e in f.evidence)
 
 
-def test_the_model_is_not_asked_when_the_rules_already_understand_the_document(tmp_path):
+def test_when_the_model_reads_no_questions_the_numbering_rules_are_used(tmp_path):
     d = new_doc()
     for i in range(1, 7):
         add(d, f"Question {i}: text")
-    model = RomanModel()
-    exam(ctx_with(cfg(model)), parse_docx(save(d, tmp_path)))
-    assert model.calls == 0
+    model = RomanModel()                           # finds only roman numerals, so it reads no question here
+    f = exam(ctx_with(cfg(model)), parse_docx(save(d, tmp_path)))["CE1"]
+    assert model.calls == 1 and f.status == PASS and not any("read by the model" in e for e in f.evidence)
 
 
 # ----------------------------------------------------------------- end to end
@@ -180,10 +172,8 @@ def test_end_to_end_with_model_fallback(tmp_path):
     model = cfg(RomanModel(), "suggest", Cache(tmp_path / "cache"))
     pkg, res, xlsx, _ = cli.review(zip_path, checklist(tmp_path), str(tmp_path / "out"), model=model)
     pq1 = next(f for f in res.findings if f.code == "PQ1" and f.lesson is not None)
-    assert pq1.status == REVIEW and pq1.method == "model" and "Would be pass" in pq1.message
+    assert pq1.status == PASS and any("read by the model" in e for e in pq1.evidence)   # the rules could not read roman numerals
     wb = openpyxl.load_workbook(xlsx)
-    assert wb["Pop Quiz"]["C6"].value is None                       # a suggestion is never a Pass in the workbook
-    assert "[model-assisted]" in wb["Pop Quiz"]["I6"].value if wb["Pop Quiz"]["I6"].value else True
     summary = {r[0].value: r[1].value for r in wb["Review Summary"].iter_rows(min_row=2, max_row=12) if r[0].value}
     assert "suggest mode" in summary["Model fallback"]
     data = json.load(open(tmp_path / "out" / "review.json", encoding="utf8"))

@@ -9,7 +9,8 @@ from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 
 from ..models import FAIL, NA, PASS, REVIEW, LessonKey
-from ..questions import (BankItem, load_bank_items, numbering_is_regular, parse_questions, segment_lessons, para_is_highlighted)
+from ..questions import (BankItem, load_bank_items, numbering_is_regular, parse_questions, questions_from_starts, segment_lessons,
+                         para_is_highlighted)
 from ..fallback import recover_questions
 from ..textutil import dominant_script, normalize, to_western_digits
 from .common import result, mark
@@ -140,7 +141,14 @@ def _align_pop_quiz(ctx):
     info = ctx.docx(pq)
     if info is None:
         return {}, None, "The Pop Quiz could not be read"
-    groups = segment_lessons(info, ctx.profile)
+    heads = None
+    if ctx.model is not None:                    # the model reads where each lesson's section starts
+        from ..layout import group_lessons, read_lesson_heads
+        heads = read_lesson_heads(ctx, pq, info)
+    groups = group_lessons(heads, len(info.paras)) if heads else segment_lessons(info, ctx.profile)
+    model_qs = None
+    if ctx.model is not None:                    # and where each question starts, across the whole quiz
+        model_qs, _ = recover_questions(info, ctx.model, pq)
     pkg_keys = defaultdict(set)
     for d in ctx.pkg.docs:
         if d.lesson is not None and d.chapter is not None:
@@ -165,10 +173,10 @@ def _align_pop_quiz(ctx):
             if (h["num"], variant) not in pkg_keys[ch]:
                 continue                  # a lesson the package does not contain
             qs = parse_questions(info, ctx.profile, h["start"] + 1, h["end"])
-            if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
-                recovered, _ = recover_questions(info, ctx.model, pq, h["start"] + 1, h["end"])
-                if recovered:
-                    qs = recovered
+            if model_qs:
+                # the model's question starts in this lesson's section, each question ending at the next or at the section end
+                starts = [(q.start, n) for n, q in enumerate([q for q in model_qs if h["start"] < q.start < h["end"]], 1)]
+                qs = _model_read(questions_from_starts(info, starts, h["end"], source="model"))
             mapping[key] = qs
     if not any(mapping.values()):
         return {}, info, ("No questions were recognised anywhere in the Pop Quiz, so its question format may not be supported "
@@ -213,6 +221,8 @@ def pop_quiz_checks(ctx):
             bad = True
         out.append(result("PQ1", FAIL if bad else PASS, "; ".join(ev) or f"{len(qs)} MCQ questions", ev, lesson=key, doc=_pq_rel(ctx),
                           marks=[mark(q.text, "not a multiple-choice question") for q in qs if q.qtype != "mcq"]))
+        if qs and qs[0].source == "model-read":
+            out[-1].evidence.append("Questions were read by the model.")
 
         labels = vocab["lesson_plan_location_labels"]
         missing = [q.num for q in qs if not _label_present(q.block, labels)]
@@ -342,21 +352,35 @@ def _tag_check(ctx, code, qs, info, key=None, chapter=None, doc=None):
 
 
 def get_questions(ctx, doc, info):
-    """(questions, model_summary, why_model_did_not_help) for a question document, parsed once.
-    The rule-based parser goes first; the model is asked only when the rules find nothing
-    or cannot trust the numbering."""
+    """(questions, model_summary, why_model_did_not_help) for a question document, read once.
+    With a model, the model reads where each question starts (verified against the document) and its reading is
+    used; the numbering rules are used when there is no model or its reading fails verification."""
     cache = ctx.__dict__.setdefault("_qcache", {})
     if id(info) not in cache:
         qs = parse_questions(info, ctx.profile)
         summary = why_not = ""
-        if ctx.model is not None and (not qs or not numbering_is_regular(qs)):
-            recovered, summary = recover_questions(info, ctx.model, doc)
-            if recovered:
-                qs = recovered
+        if ctx.model is not None:
+            read, summary = recover_questions(info, ctx.model, doc)
+            if read:
+                _note_count(ctx, info, len(qs), len(read))
+                qs = _model_read(read)
             else:
                 why_not = summary
         cache[id(info)] = (info, qs, summary, why_not)   # holding info keeps its id from being reused
     return cache[id(info)][1:]
+
+
+def _model_read(qs):
+    """Questions the model read as the primary reading: their results are decided, not suggestions."""
+    for q in qs:
+        q.source = "model-read"
+    return qs
+
+
+def _note_count(ctx, info, by_rules, by_model):
+    if by_rules and by_rules != by_model:
+        ctx.__dict__.setdefault("_qnotes", {})[id(info)] = (
+            f"The model read {by_model} question(s); the numbering rules counted {by_rules}. The model's reading was used.")
 
 
 def exam_checks(ctx, doc, info, doc_type):
@@ -381,6 +405,11 @@ def exam_checks(ctx, doc, info, doc_type):
         for f in out:
             if f.status == REVIEW:
                 f.evidence.append("Model fallback did not help: " + why_not)
+    if qs and qs[0].source == "model-read":
+        note = ctx.__dict__.get("_qnotes", {}).get(id(info))
+        for f in out:
+            if f.code in ("CE1", "WS1", "CE4", "WS3", "WS2"):
+                f.evidence.append("Questions were read by the model." + (" " + note if note else ""))
     return _model_policy(ctx, out, qs, summary)
 
 
@@ -416,7 +445,14 @@ def data_bank_checks(ctx):
             for code in ("DB1", "DB2", "DB3", "DB4", "DB5"):
                 out.append(result(code, REVIEW, "No Data Bank document in the package", lesson=k))
         return out, None
-    items = load_bank_items(bank.abs, ctx.profile)
+    items = []
+    if ctx.model is not None:                    # the model reads which field is which; code reads the cells
+        from ..layout import read_bank_fields
+        reading = read_bank_fields(ctx, bank.abs)
+        if reading:
+            items = load_bank_items(bank.abs, ctx.profile, reading)
+    if not items:
+        items = load_bank_items(bank.abs, ctx.profile)
     if not items:
         for k in keys:
             for code in ("DB1", "DB2", "DB3", "DB4", "DB5"):

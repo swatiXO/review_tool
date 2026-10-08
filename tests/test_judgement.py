@@ -216,7 +216,8 @@ def test_tagged_questions_are_decided_by_code_not_the_model(tmp_path):
     model = FakeJudge("pass")
     _, res, _, _ = review(tmp_path, cfg(model, codes={"PQ5"}), tagged=True, with_guide=False)
     f = next(f for f in res.findings if f.code == "PQ5")
-    assert f.method == "deterministic" and f.status == FAIL and model.calls == 0
+    assert f.method == "deterministic" and f.status == FAIL
+    assert not any("PQ5" in p or "Questions:" in p for p in model.prompts)   # the model may read layout, never this decision
 
 
 # --------------------------------------------------------------- book index

@@ -36,9 +36,12 @@ class Slo:
         return f"Ch{self.chapter} L{self.lesson} SLO {self.index}"
 
 
-def load_slos(spec_path):
-    """{(chapter, lesson): [Slo]} read from every table whose header has an 'SLOs' column."""
+def load_slos(spec_path, plan=None):
+    """{(chapter, lesson): [Slo]}. plan: {table number: {chapter, lesson_no, lesson_name, slo, bloom}} from the model
+    (layout.read_spec_tables); without it, every table whose header has an 'SLOs' column, under a 'Chapter N' line."""
     doc = Document(spec_path)
+    if plan:
+        return _slos_from_plan(doc, plan)
     out, chapter = {}, None
     for child in doc.element.body.iterchildren():
         tag = child.tag.split("}")[1]
@@ -80,6 +83,37 @@ def load_slos(spec_path):
                 lst.append(Slo(chapter, no, last_name, len(lst) + 1, text,
                                cells[col["bloom"]].text.strip() if "bloom" in col else "",
                                cells[col["cov"]].text.strip() if "cov" in col else ""))
+    return out
+
+
+def _slos_from_plan(doc, plan):
+    out, n = {}, 0
+    for child in doc.element.body.iterchildren():
+        if child.tag.split("}")[1] != "tbl":
+            continue
+        cols = plan.get(n)
+        n += 1
+        if not cols:
+            continue
+        table = Table(child, doc)
+        chapter, last_no, last_name = cols["chapter"], None, ""
+        for row in table.rows:
+            cells = row.cells
+            def cell(k):
+                i = cols.get(k)
+                return cells[i].text.strip() if i is not None and i < len(cells) else ""
+            m = re.match(r"\s*(\d+)", to_western_digits(cell("lesson_no")))
+            if m is None and last_no is None:
+                continue                  # the header row, or rows before the first lesson
+            no = int(m.group(1)) if m else last_no
+            text = cell("slo")
+            if not text:
+                continue
+            last_no, last_name = no, cell("lesson_name") or last_name
+            lst = out.setdefault((chapter, no), [])
+            # an SLO cell may hold several SLOs, one per line
+            for line in [l.strip(" •-–—*") for l in text.split("\n") if l.strip(" •-–—*")]:
+                lst.append(Slo(chapter, no, last_name, len(lst) + 1, line, cell("bloom")))
     return out
 
 

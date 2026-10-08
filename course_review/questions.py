@@ -281,10 +281,59 @@ def _canon_map(profile):
     return out
 
 
-def load_bank_items(path, profile):
+def _cell_highlighted(cell):
+    tc = cell._tc
+    return any((h.get(qn("w:val")) or "").lower() == "yellow" for h in tc.iter(qn("w:highlight"))) or \
+        any(is_yellow(s.get(qn("w:fill"))) for s in tc.iter(qn("w:shd")))
+
+
+def _bank_item(fields, present, raw_keys, hl, order, profile):
+    chapter = lesson_no = None
+    cl = fields.get("chapter_lesson", "")
+    if cl:
+        parts = re.split(r"\s*/\s*|\n", cl)
+        chapter = chapter_from_text(parts[0], profile)
+        m = re.match(r"\s*(\d+)", to_western_digits(normalize(parts[1] if len(parts) > 1 else "")))
+        lesson_no = int(m.group(1)) if m else None
+    else:
+        if fields.get("chapter"):
+            chapter = chapter_from_text("chapter " + fields["chapter"], profile) or chapter_from_text(fields["chapter"], profile)
+        m = re.search(r"(\d+)", to_western_digits(normalize(fields.get("lesson", ""))))
+        lesson_no = int(m.group(1)) if m else None
+    return BankItem(chapter, lesson_no, fields, present, hl, raw_keys, order)
+
+
+def load_bank_items(path, profile, reading=None):
+    """Data Bank items. reading: (layout, {field name: canonical field}) from the model (layout.read_bank_fields);
+    without it the profile's field names are used. Two layouts are read: one table per item with the field names
+    in the first column, and one table with the field names in its header row and an item in each further row."""
     doc = Document(path)
-    cmap = _canon_map(profile)
+    cmap = dict(reading[1]) if reading else _canon_map(profile)
     items = []
+    # header-row layout: a table whose first row names at least three fields, one of them the question
+    for ti, t in enumerate(doc.tables):
+        rows = t.rows
+        if len(rows) < 2 or len(rows[0].cells) < 4:
+            continue
+        head = [cmap.get(normalize(c.text).lower()) for c in rows[0].cells]
+        if "question" not in head or sum(1 for h in head if h) < 3:
+            continue
+        raw = [c.text.strip() for c in rows[0].cells]
+        for ri, row in enumerate(rows[1:], 1):
+            cells = row.cells
+            fields, present, hl = {}, set(), False
+            for canon, cell in zip(head, cells):
+                if canon is None or canon == "item":
+                    continue
+                present.add(canon)
+                fields[canon] = cell.text.strip()
+                if canon in ("options", "answer") and _cell_highlighted(cell):
+                    hl = True
+            if not fields.get("question"):
+                continue
+            items.append(_bank_item(fields, present, raw, hl, ti * 1000 + ri, profile))
+    if items:
+        return items
     for ti, t in enumerate(doc.tables):
         fields, present, raw_keys, hl = {}, set(), [], False
         for row in t.rows:
@@ -296,21 +345,13 @@ def load_bank_items(path, profile):
             canon = cmap.get(key)
             if canon is None:
                 continue
+            if canon == "item":
+                continue
             present.add(canon)
             fields[canon] = cells[1].text.strip()
-            if canon in ("options", "answer"):
-                tc = cells[1]._tc
-                if any((h.get(qn("w:val")) or "").lower() == "yellow" for h in tc.iter(qn("w:highlight"))) or \
-                        any(is_yellow(s.get(qn("w:fill"))) for s in tc.iter(qn("w:shd"))):
-                    hl = True
+            if canon in ("options", "answer") and _cell_highlighted(cells[1]):
+                hl = True
         if not present:
             continue
-        chapter = lesson_no = None
-        cl = fields.get("chapter_lesson", "")
-        if cl:
-            parts = re.split(r"\s*/\s*|\n", cl)
-            chapter = chapter_from_text(parts[0], profile)
-            m = re.match(r"\s*(\d+)", to_western_digits(normalize(parts[1] if len(parts) > 1 else "")))
-            lesson_no = int(m.group(1)) if m else None
-        items.append(BankItem(chapter, lesson_no, fields, present, hl, raw_keys, ti))
+        items.append(_bank_item(fields, present, raw_keys, hl, ti, profile))
     return items

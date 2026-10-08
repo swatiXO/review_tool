@@ -23,7 +23,11 @@ def get_slos(ctx):
         ctx._slos = None
         if spec is not None:
             try:
-                ctx._slos = load_slos(spec.abs) or None
+                plan = None
+                if ctx.model is not None:            # the model reads the tables' layout; code reads the cells
+                    from ..layout import read_spec_tables
+                    plan = read_spec_tables(ctx, spec.abs)
+                ctx._slos = (load_slos(spec.abs, plan) if plan else None) or load_slos(spec.abs) or None
             except Exception as e:
                 ctx.errors[spec.rel] = f"{type(e).__name__}: {e}"
     return ctx._slos
