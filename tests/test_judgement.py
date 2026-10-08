@@ -278,3 +278,11 @@ def test_split_parts_keeps_all_text():
     parts = split_parts(text, 2500)
     assert all(len(p) <= 2500 for p in parts)
     assert "".join(parts).replace("\n", "") == text.replace("\n", "")
+
+
+def test_a_suggested_slo_gap_is_marked_on_the_slo_not_on_the_quoted_evidence():
+    from course_review.checks.judgement import _mark_uncovered
+    from course_review.checks.common import result
+    f = result("LP1", REVIEW, "x", method="model", marks=[{"text": "evidence 1", "note": "n", "exact": False}] * 5)
+    _mark_uncovered(f, ["Name the parts", "Draw and label a cell"], [2])
+    assert [m["text"] for m in f.marks] == ["Draw and label a cell"] and "FAIL" in f.marks[0]["note"]

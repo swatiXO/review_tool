@@ -109,6 +109,15 @@ def _cb_parts(ctx, secs, slos):
     return split_parts(secs["concept_building"], max(1500, room))
 
 
+def _mark_uncovered(f, slos, missing):
+    """A suggested gap is shown on the SLO that seems not to be taught, once; not on the passages the model quoted
+    as evidence for the SLOs that are."""
+    if not missing:
+        return
+    f.marks = [mark(slos[n - 1], "model suggests FAIL: this SLO does not seem to be taught or practised in Concept Building",
+                    exact=False) for n in missing if 1 <= n <= len(slos)]
+
+
 def lp1(ctx, key, doc, secs, slos):
     if not slos or "concept_building" not in secs:
         return None
@@ -117,14 +126,16 @@ def lp1(ctx, key, doc, secs, slos):
     if len(parts) == 1:
         mats = [Material("SLOs (numbered)", numbered(slos)), Material("Concept Building", parts[0])]
         j = judge(ctx.model, "LP1", rule, mats,
-                  'Is every numbered SLO fully covered somewhere in the Concept Building text? List the numbers of any SLO that is not '
-                  'fully covered in "uncovered_slos" (an empty list if all are covered).',
+                  'Is every numbered SLO fully covered somewhere in the Concept Building text? An SLO counts as covered when the text '
+                  'teaches it or has the students practise it (an activity, exercise or task that asks them to do it). List the numbers '
+                  'of any SLO that is not covered in "uncovered_slos" (an empty list if all are covered).',
                   extra_keys=("uncovered_slos",),
                   validate_extra=lambda e: e.get("uncovered_slos") is None or (isinstance(e["uncovered_slos"], list)
                                            and all(isinstance(n, int) and 1 <= n <= len(slos) for n in e["uncovered_slos"])))
         if j.usable and j.verdict == "pass" and j.extra.get("uncovered_slos"):
             j.usable, j.note = False, "the model said pass but also listed SLOs it found uncovered"
         f = suggestion("LP1", j, **where(key, doc))
+        _mark_uncovered(f, slos, j.extra.get("uncovered_slos") if j.usable else None)
         if j.usable and j.extra.get("uncovered_slos"):
             f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{n} ({slos[n - 1][:50]})" for n in j.extra["uncovered_slos"]))
         return f
@@ -135,7 +146,7 @@ def lp1(ctx, key, doc, secs, slos):
         mats = [Material("SLOs (numbered)", numbered(slos)), Material(f"Concept Building, part {i} of {len(parts)}", part)]
         j = judge(ctx.model, f"LP1-part{i}", rule, mats,
                   f'This is part {i} of {len(parts)} of the Concept Building text. List in "covered_slos" the numbers of the SLOs that '
-                  'THIS part covers fully, with a quote for each. Set "verdict" to pass if it covers at least one SLO, otherwise unclear.',
+                  'THIS part covers: it teaches them or has the students practise them (an activity, exercise or task), with a quote for each. Set "verdict" to pass if it covers at least one SLO, otherwise unclear.',
                   extra_keys=("covered_slos",),
                   validate_extra=lambda e: isinstance(e.get("covered_slos"), list)
                   and all(isinstance(x, int) and 1 <= x <= n for x in e["covered_slos"]))
@@ -153,6 +164,7 @@ def lp1(ctx, key, doc, secs, slos):
                           "; ".join(f"'{slos[x - 1][:70]}'" for x in missing) + "." if missing
                           else "every SLO is taught somewhere in Concept Building."))
     f = suggestion("LP1", j, **where(key, doc))
+    _mark_uncovered(f, slos, missing)
     if missing:
         f.evidence.append("SLO(s) not fully covered: " + ", ".join(f"{x} ({slos[x - 1][:50]})" for x in missing))
     if notes:

@@ -219,6 +219,10 @@ def annotate_docx(src, dst, findings, fixed=None, changes=None):
         if pink:
             lines.append(f"{pink} line(s) are pink: we fixed them. Delete those notes once you have looked.")
         _comment(doc, _text_runs(first)[:1], lines)
+    from .ooxml import order_run_properties
+    order_run_properties(doc.element)
+    for part in (doc.part._comments_part,) if doc.comments else ():
+        order_run_properties(part.element)
     doc.save(dst)
     return sum(1 for v in per_para.values() if v)
 

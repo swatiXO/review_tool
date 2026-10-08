@@ -157,3 +157,23 @@ def test_a_re_uploaded_copy_loses_the_earlier_review_but_keeps_peoples_comments(
     left = Document(tmp_path / "again.docx")
     assert [c.author for c in left.comments] == ["Ayesha"]
     assert [p.text for p in left.paragraphs] == ["Introduction", "Body text of the lesson."]
+
+
+def test_run_formatting_is_saved_in_the_order_word_requires(tmp_path):
+    from course_review.ooxml import RPR_ORDER
+    from course_review import autofix
+    from course_review.docx_model import parse_docx
+    from helpers import make_ctx, ref
+    d = new_doc()
+    add(d, "Introduction", bold=False, size=11)
+    add(d, "Body text.")
+    src = save(d, tmp_path)
+    fixed = str(tmp_path / "fixed.docx")
+    autofix.fix_docx(src, fixed, make_ctx(), ref(), parse_docx(src))     # sets bold after the size was written
+    out = tmp_path / "out.docx"
+    annotate.annotate_docx(fixed, out, [result("WE12", FAIL, "x", marks=[mark("Introduction", "no number")])])
+    for r in Document(out).element.body.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r"):
+        rpr = r.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
+        if rpr is not None:
+            ranks = [RPR_ORDER.index(c.tag.split("}")[1]) for c in rpr if c.tag.split("}")[1] in RPR_ORDER]
+            assert ranks == sorted(ranks)

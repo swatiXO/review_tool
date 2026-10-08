@@ -655,6 +655,12 @@ def fix_docx(src, dst, ctx, doc, info):
             settings = d.settings.element
             _set(settings, "w:updateFields", {"w:val": "true"})
             lines.append("Table of contents added after the title (click Yes when Word asks to update fields)")
+    from .ooxml import order_run_properties
+    order_run_properties(d.element)
+    for sec in d.sections:                      # footers and headers too
+        for part in (sec.footer, sec.header):
+            if part is not None and not part.is_linked_to_previous:
+                order_run_properties(part._element)
     d.save(dst)
     done = [{"text": "".join(t.text or "" for t in c[0].iter(qn("w:t"))).strip(), "plain": c[1], "check": len(c) > 2 and c[2]}
             for c in changes]
