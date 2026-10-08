@@ -72,7 +72,7 @@ def review(zip_path, checklist, out_dir, profile_path=None, keep=False, model=No
 
 def _model_args(p):
     p.add_argument("--model-url", help="Ollama base URL, e.g. your ngrok link (or set OLLAMA_URL)")
-    p.add_argument("--model", help="model name (or set OLLAMA_MODEL; default qwen3:14b)")
+    p.add_argument("--model", help="model name (or set OLLAMA_MODEL; default qwen3.5:9b)")
     p.add_argument("--cache-dir", default=".course_review_cache", help="where model answers are cached")
 
 

@@ -116,7 +116,7 @@ HOME = """
       <label>Checklist workbook<span>{% if default_checklist %}Leave empty to use the built-in <b>{{ default_checklist }}</b>.{% else %}Required: no default checklist is configured.{% endif %}</span>
         <input class="plain" type="file" name="checklist" accept=".xlsx" {% if not default_checklist %}required{% endif %}></label>
       <label>Ollama address<span>For example your ngrok link.</span><input type="text" name="model_url" value="{{ model_url }}" placeholder="http://localhost:11434"></label>
-      <label>Model name<input type="text" name="model_name" value="{{ model_name }}" placeholder="qwen3:14b"></label>
+      <label>Model name<input type="text" name="model_name" value="{{ model_name }}" placeholder="qwen3.5:9b"></label>
       <label>Textbook index<span>Made with the index-book command.</span>
         <select name="book_index"><option value="">None</option>{% for b in books %}<option>{{ b }}</option>{% endfor %}</select></label>
     </div></details>

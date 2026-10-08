@@ -2,7 +2,7 @@
 
 Configuration (command line flags win over environment):
   OLLAMA_URL    full base URL, e.g. https://abcd1234.ngrok-free.dev or http://localhost:11434
-  OLLAMA_MODEL  model name, default qwen3:14b
+  OLLAMA_MODEL  model name, default qwen3.5:9b (the model the team runs)
 No cloud service is involved; the only network call is to this server.
 """
 import json
@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 
 DEFAULT_URL = "http://localhost:11434"
-DEFAULT_MODEL = "qwen3:14b"
+DEFAULT_MODEL = "qwen3.5:9b"
 
 
 class LLMError(Exception):
